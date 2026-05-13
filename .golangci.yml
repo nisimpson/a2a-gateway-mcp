@@ -1,0 +1,13 @@
+run:
+  go: "1.25.7"
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - staticcheck
+
+issues:
+  exclude-dirs:
+    - vendor/

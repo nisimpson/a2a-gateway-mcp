@@ -1,0 +1,22 @@
+name: test
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.x
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Lint
+        run: make lint
+      - name: Test
+        run: make test
