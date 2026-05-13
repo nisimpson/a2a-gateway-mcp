@@ -107,7 +107,6 @@ func TestPropertyDiscoverAgentsReturnsUnmodified(t *testing.T) {
 	properties.TestingRun(t)
 }
 
-
 // Unit tests for discover_agents handler
 
 func TestHandleDiscoverAgents_Success(t *testing.T) {

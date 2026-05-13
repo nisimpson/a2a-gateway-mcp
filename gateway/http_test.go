@@ -126,7 +126,6 @@ func TestPropertyHeaderInjectionComposition(t *testing.T) {
 	properties.TestingRun(t)
 }
 
-
 // Feature: a2a-gateway-mcp, Property 11: URL-based requests bypass header injection
 // **Validates: Requirements AGMCP-14.7, AGMCP-13.8**
 

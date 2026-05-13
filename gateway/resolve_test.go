@@ -29,11 +29,11 @@ func TestPropertyAgentResolutionConsistency(t *testing.T) {
 
 	// Generator for random strings that are neither valid aliases nor valid URLs
 	randomStringGen := gen.OneGenOf(
-		gen.RegexMatch(`[A-Z][A-Z0-9]{2,10}`),       // uppercase (not a valid alias or URL)
-		gen.RegexMatch(`ftp://[a-z]{3,10}\\.com`),    // ftp scheme (not http/https)
-		gen.RegexMatch(`[a-z]{1,5}_[a-z]{1,5}`),      // underscores (not a valid alias, not a URL)
-		gen.Const(""),                                  // empty string
-		gen.RegexMatch(`[a-z ]{2,8}`),                 // spaces (not valid alias or URL)
+		gen.RegexMatch(`[A-Z][A-Z0-9]{2,10}`),     // uppercase (not a valid alias or URL)
+		gen.RegexMatch(`ftp://[a-z]{3,10}\\.com`), // ftp scheme (not http/https)
+		gen.RegexMatch(`[a-z]{1,5}_[a-z]{1,5}`),   // underscores (not a valid alias, not a URL)
+		gen.Const(""),                             // empty string
+		gen.RegexMatch(`[a-z ]{2,8}`),             // spaces (not valid alias or URL)
 	)
 
 	// Helper to check if identifier is a valid HTTP/HTTPS URL
@@ -179,9 +179,9 @@ func TestPropertyAgentResolutionConsistency(t *testing.T) {
 		},
 		gen.SliceOfN(10, aliasGen),
 		gen.OneGenOf(
-			aliasGen,         // might match a registered alias
-			urlGen,           // valid URL
-			randomStringGen,  // neither alias nor URL
+			aliasGen,        // might match a registered alias
+			urlGen,          // valid URL
+			randomStringGen, // neither alias nor URL
 		),
 	))
 

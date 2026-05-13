@@ -96,13 +96,13 @@ func TestNewServer_AllToolsRegistered(t *testing.T) {
 
 	ctx := context.Background()
 	expectedTools := map[string]bool{
-		"connect_agent":    false,
-		"disconnect_agent": false,
-		"list_agents":      false,
-		"get_agent_card":   false,
-		"send_message":     false,
+		"connect_agent":     false,
+		"disconnect_agent":  false,
+		"list_agents":       false,
+		"get_agent_card":    false,
+		"send_message":      false,
 		"broadcast_message": false,
-		"discover_agents":  false,
+		"discover_agents":   false,
 	}
 
 	for tool, err := range session.Tools(ctx, nil) {

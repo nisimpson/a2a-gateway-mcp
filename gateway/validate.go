@@ -6,11 +6,11 @@ import (
 )
 
 const (
-	maxAliasLength          = 64
-	maxMessageLength        = 32768
-	maxHeaderEntries        = 20
-	maxBroadcastAliases     = 20
-	minBroadcastAliases     = 1
+	maxAliasLength      = 64
+	maxMessageLength    = 32768
+	maxHeaderEntries    = 20
+	maxBroadcastAliases = 20
+	minBroadcastAliases = 1
 )
 
 // ValidateAlias checks that the alias contains only lowercase letters, digits, and hyphens,

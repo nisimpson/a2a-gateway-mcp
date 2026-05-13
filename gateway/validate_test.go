@@ -191,7 +191,7 @@ func TestPropertyValidationRejectsInvalidAliases(t *testing.T) {
 			return err != nil
 		},
 		gen.RegexMatch(`[a-z0-9\-]{0,10}`), // valid prefix
-		invalidCharGen,                       // at least one invalid character
+		invalidCharGen,                     // at least one invalid character
 		gen.RegexMatch(`[a-z0-9\-]{0,10}`), // valid suffix
 	))
 
