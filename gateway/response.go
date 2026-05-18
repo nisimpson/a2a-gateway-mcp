@@ -9,7 +9,6 @@ import (
 
 // FormatTaskResponse extracts text content from an A2A Task and formats it
 // as MCP CallToolResult content items.
-// Requirement: AGMCP-7.1, AGMCP-7.2, AGMCP-7.3, AGMCP-7.4, AGMCP-7.5 — response formatting
 //
 // Behavior:
 //   - If the task has artifacts with TextParts, concatenates all TextPart text

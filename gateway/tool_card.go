@@ -13,7 +13,6 @@ import (
 
 // handleGetAgentCard retrieves the agent card from an A2A agent's
 // /.well-known/agent.json endpoint.
-// Requirement: AGMCP-1.1, AGMCP-1.2, AGMCP-1.4, AGMCP-1.5 — card retrieval with error handling
 func (s *Server) handleGetAgentCard(ctx context.Context, _ *mcp.CallToolRequest, input GetAgentCardInput) (*mcp.CallToolResult, any, error) {
 	// Validate agent identifier is non-empty.
 	if strings.TrimSpace(input.Agent) == "" {

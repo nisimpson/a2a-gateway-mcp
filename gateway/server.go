@@ -55,7 +55,6 @@ type Server struct {
 }
 
 // NewServer creates a new gateway server with the given options.
-// Requirement: AGMCP-3.1, AGMCP-3.2, AGMCP-15.1, AGMCP-15.3 — init with empty state and configurable client
 func NewServer(opts ...Option) *Server {
 	cfg := &serverConfig{
 		httpClient: &http.Client{Timeout: defaultHTTPTimeout},
@@ -86,7 +85,6 @@ func NewServer(opts ...Option) *Server {
 
 // Run starts the MCP server on the stdio transport, blocking until the
 // client disconnects or an error occurs.
-// Requirement: AGMCP-4.1, AGMCP-4.5 — stdio JSON-RPC with graceful EOF shutdown
 func (s *Server) Run(ctx context.Context) error {
 	transport := &mcp.StdioTransport{}
 	return s.mcpServer.Run(ctx, transport)

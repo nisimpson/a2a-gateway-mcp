@@ -8,7 +8,6 @@ import (
 )
 
 // handleConnectAgent registers a remote A2A agent with a friendly alias.
-// Requirement: AGMCP-9.1, AGMCP-9.2, AGMCP-13.9, AGMCP-14.1 — connect with overwrite and context clearing
 func (s *Server) handleConnectAgent(_ context.Context, _ *mcp.CallToolRequest, input ConnectAgentInput) (*mcp.CallToolResult, any, error) {
 	// Validate alias format.
 	if err := ValidateAlias(input.Alias); err != nil {

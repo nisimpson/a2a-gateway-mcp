@@ -13,7 +13,6 @@ type AgentEntry struct {
 }
 
 // AgentRegistry is a thread-safe, in-memory map of aliases to agent entries.
-// Requirement: AGMCP-3.1, AGMCP-9.4 — ephemeral registry with concurrent safety
 type AgentRegistry struct {
 	mu      sync.RWMutex
 	entries map[string]*AgentEntry // key: alias

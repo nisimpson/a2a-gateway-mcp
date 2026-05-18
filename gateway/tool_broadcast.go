@@ -29,7 +29,6 @@ type broadcastResult struct {
 
 // handleBroadcastMessage sends the same message to multiple agents simultaneously
 // and collects responses.
-// Requirement: AGMCP-12.1, AGMCP-12.3, AGMCP-12.7 — concurrent broadcast with partial results
 func (s *Server) handleBroadcastMessage(ctx context.Context, _ *mcp.CallToolRequest, input BroadcastMessageInput) (*mcp.CallToolResult, any, error) {
 	// Validate aliases.
 	if err := ValidateBroadcastAliases(input.Aliases); err != nil {

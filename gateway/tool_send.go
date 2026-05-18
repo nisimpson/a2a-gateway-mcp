@@ -19,7 +19,6 @@ const (
 )
 
 // handleSendMessage sends a text message to a connected A2A agent by alias or URL.
-// Requirement: AGMCP-2.1, AGMCP-2.2, AGMCP-2.5, AGMCP-2.6, AGMCP-2.7 — message send with context lifecycle
 func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, input SendMessageInput) (*mcp.CallToolResult, any, error) {
 	// Validate agent identifier is provided.
 	if input.Agent == "" {
@@ -157,7 +156,7 @@ func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 		}, nil, nil
 
 	default:
-		// Requirement: AGMCP-2.10 — poll up to 60s for non-terminal states
+		// Poll up to 60s for non-terminal states.
 		task, err := s.pollTaskCompletion(ctx, client, resolved.URL, task.ID)
 		if err != nil {
 			return &mcp.CallToolResult{

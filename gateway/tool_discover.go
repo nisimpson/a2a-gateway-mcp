@@ -15,7 +15,6 @@ import (
 
 // handleDiscoverAgents queries a remote agent directory service and returns
 // the raw JSON array of agent cards without modification.
-// Requirement: AGMCP-16.1, AGMCP-16.5, AGMCP-16.6 — read-only directory discovery
 func (s *Server) handleDiscoverAgents(ctx context.Context, _ *mcp.CallToolRequest, input DiscoverAgentsInput) (*mcp.CallToolResult, any, error) {
 	// Validate directory_url is provided and has http/https scheme.
 	if err := ValidateURL(input.DirectoryURL); err != nil {

@@ -15,7 +15,6 @@ type listAgentEntry struct {
 
 // handleListAgents returns a JSON array of all currently connected agents
 // with their aliases and URLs, sorted by alias in ascending order.
-// Requirement: AGMCP-11.1, AGMCP-11.2, AGMCP-11.3 — sorted agent listing
 func (s *Server) handleListAgents(_ context.Context, _ *mcp.CallToolRequest, _ ListAgentsInput) (*mcp.CallToolResult, any, error) {
 	entries := s.registry.List()
 

@@ -7,7 +7,6 @@ import (
 
 // headerRoundTripper wraps an http.RoundTripper and injects static headers
 // before delegating to the base transport.
-// Requirement: AGMCP-14.2, AGMCP-14.6, AGMCP-15.6 — header composition with protocol protection
 type headerRoundTripper struct {
 	base    http.RoundTripper
 	headers map[string]string

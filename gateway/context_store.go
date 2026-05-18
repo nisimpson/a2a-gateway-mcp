@@ -3,7 +3,6 @@ package gateway
 import "sync"
 
 // ContextStore is a thread-safe, in-memory map of agent aliases to context IDs.
-// Requirement: AGMCP-13.1 — per-alias conversation context tracking
 type ContextStore struct {
 	mu       sync.RWMutex
 	contexts map[string]string // key: alias, value: context_id

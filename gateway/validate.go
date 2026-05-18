@@ -15,7 +15,6 @@ const (
 
 // ValidateAlias checks that the alias contains only lowercase letters, digits, and hyphens,
 // and is between 1 and 64 characters.
-// Requirement: AGMCP-5.9 — alias format validation
 func ValidateAlias(alias string) error {
 	if alias == "" {
 		return fmt.Errorf("alias is required and cannot be empty")
