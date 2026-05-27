@@ -5,7 +5,7 @@ go 1.25.10
 require (
 	github.com/a2aproject/a2a-go/v2 v2.3.0
 	github.com/leanovate/gopter v0.2.11
-	github.com/modelcontextprotocol/go-sdk v1.6.0
+	github.com/modelcontextprotocol/go-sdk v1.6.1
 )
 
 require (
