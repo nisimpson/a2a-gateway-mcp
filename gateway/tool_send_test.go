@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -205,16 +206,10 @@ func TestPropertyContextLifecycleCorrectness(t *testing.T) {
 
 // --- Unit Tests for send_message handler (Task 8.3) ---
 
-// newTestServerWithAgent creates a Server with a registered agent pointing to the given URL.
-func newTestServerWithAgent(alias, agentURL string) *Server {
-	srv := NewServer()
-	srv.registry.Connect(alias, agentURL, nil)
-	return srv
-}
-
 func TestHandleSendMessage_CompletedTask(t *testing.T) {
 	// Mock A2A agent that returns a completed task with text artifacts.
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID:        "task-1",
 			ContextID: "ctx-resp-1",
@@ -225,8 +220,7 @@ func TestHandleSendMessage_CompletedTask(t *testing.T) {
 				},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -245,7 +239,7 @@ func TestHandleSendMessage_CompletedTask(t *testing.T) {
 		t.Fatalf("expected success, got error: %v", result.Content)
 	}
 
-	// Should have text content + context_id content
+	// Should have text content + task_id content + context_id content
 	if len(result.Content) < 1 {
 		t.Fatalf("expected at least 1 content item, got %d", len(result.Content))
 	}
@@ -266,6 +260,7 @@ func TestHandleSendMessage_CompletedTask(t *testing.T) {
 
 func TestHandleSendMessage_FailedTask(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID:        "task-2",
 			ContextID: "ctx-resp-2",
@@ -274,8 +269,7 @@ func TestHandleSendMessage_FailedTask(t *testing.T) {
 				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("something went wrong")),
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -305,13 +299,13 @@ func TestHandleSendMessage_FailedTask(t *testing.T) {
 
 func TestHandleSendMessage_CanceledTask(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID:        "task-3",
 			ContextID: "ctx-resp-3",
 			Status:    a2a.TaskStatus{State: a2a.TaskStateCanceled},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -343,9 +337,10 @@ func TestHandleSendMessage_ContextID_Explicit(t *testing.T) {
 	// Verify that explicit context_id is sent to the agent.
 	var receivedContextID string
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req a2a.SendMessageRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		receivedContextID = req.Message.ContextID
+		req, _ := readJSONRPCRequest(r)
+		var params a2a.SendMessageRequest
+		_ = json.Unmarshal(req.Params, &params)
+		receivedContextID = params.Message.ContextID
 
 		task := &a2a.Task{
 			ID:        "task-4",
@@ -355,8 +350,7 @@ func TestHandleSendMessage_ContextID_Explicit(t *testing.T) {
 				{Parts: a2a.ContentParts{a2a.NewTextPart("ok")}},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -393,9 +387,10 @@ func TestHandleSendMessage_ContextID_Stored(t *testing.T) {
 	// Verify that stored context_id is used when no explicit one is provided.
 	var receivedContextID string
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req a2a.SendMessageRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		receivedContextID = req.Message.ContextID
+		req, _ := readJSONRPCRequest(r)
+		var params a2a.SendMessageRequest
+		_ = json.Unmarshal(req.Params, &params)
+		receivedContextID = params.Message.ContextID
 
 		task := &a2a.Task{
 			ID:        "task-5",
@@ -405,8 +400,7 @@ func TestHandleSendMessage_ContextID_Stored(t *testing.T) {
 				{Parts: a2a.ContentParts{a2a.NewTextPart("ok")}},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -441,9 +435,10 @@ func TestHandleSendMessage_ContextID_NewConversation(t *testing.T) {
 	// Verify that no context_id is sent for a new conversation.
 	var receivedContextID string
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req a2a.SendMessageRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		receivedContextID = req.Message.ContextID
+		req, _ := readJSONRPCRequest(r)
+		var params a2a.SendMessageRequest
+		_ = json.Unmarshal(req.Params, &params)
+		receivedContextID = params.Message.ContextID
 
 		task := &a2a.Task{
 			ID:        "task-6",
@@ -453,8 +448,7 @@ func TestHandleSendMessage_ContextID_NewConversation(t *testing.T) {
 				{Parts: a2a.ContentParts{a2a.NewTextPart("ok")}},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -487,6 +481,7 @@ func TestHandleSendMessage_ContextID_NewConversation(t *testing.T) {
 
 func TestHandleSendMessage_URLBased_BypassesContextStore(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID:        "task-7",
 			ContextID: "ctx-url-resp",
@@ -495,8 +490,7 @@ func TestHandleSendMessage_URLBased_BypassesContextStore(t *testing.T) {
 				{Parts: a2a.ContentParts{a2a.NewTextPart("url response")}},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -583,15 +577,19 @@ func TestHandleSendMessage_NonTerminalState_PollsUntilComplete(t *testing.T) {
 	// Agent returns "working" on first call, then "completed" on poll.
 	var callCount int
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		callCount++
 		var task *a2a.Task
 		if callCount == 1 {
+			// SendMessage: return working task wrapped in StreamResponse.
 			task = &a2a.Task{
 				ID:        "task-8",
 				ContextID: "ctx-working",
 				Status:    a2a.TaskStatus{State: a2a.TaskStateWorking},
 			}
+			writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 		} else {
+			// GetTask: return completed task (plain, not StreamResponse).
 			task = &a2a.Task{
 				ID:        "task-8",
 				ContextID: "ctx-done",
@@ -600,9 +598,8 @@ func TestHandleSendMessage_NonTerminalState_PollsUntilComplete(t *testing.T) {
 					{Parts: a2a.ContentParts{a2a.NewTextPart("polled result")}},
 				},
 			}
+			writeJSONRPCResult(w, req.ID, task)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
 	}))
 	defer agent.Close()
 
@@ -638,13 +635,18 @@ func TestHandleSendMessage_NonTerminalState_PollsUntilComplete(t *testing.T) {
 func TestHandleSendMessage_NonTerminalState_Timeout(t *testing.T) {
 	// Agent always returns "working" — should timeout after context deadline.
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID:        "task-9",
 			ContextID: "ctx-stuck",
 			Status:    a2a.TaskStatus{State: a2a.TaskStateWorking},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		// Respond differently based on method: SendMessage vs GetTask
+		if req.Method == "message/send" {
+			writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+		} else {
+			writeJSONRPCResult(w, req.ID, task)
+		}
 	}))
 	defer agent.Close()
 
@@ -679,6 +681,7 @@ func TestHandleSendMessage_NonTerminalState_Timeout(t *testing.T) {
 func TestHandleSendMessage_InputRequired_ReturnsImmediately(t *testing.T) {
 	// Agent returns input-required with a status message explaining what's needed.
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID:        "task-input-1",
 			ContextID: "ctx-input-1",
@@ -687,8 +690,7 @@ func TestHandleSendMessage_InputRequired_ReturnsImmediately(t *testing.T) {
 				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("Please confirm: proceed with deletion?")),
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -707,9 +709,9 @@ func TestHandleSendMessage_InputRequired_ReturnsImmediately(t *testing.T) {
 		t.Fatalf("expected success for input-required state, got error: %v", result.Content)
 	}
 
-	// Should contain: status message text, state indicator, context_id.
-	if len(result.Content) < 3 {
-		t.Fatalf("expected at least 3 content items, got %d", len(result.Content))
+	// Should contain: status message text, state indicator, task_id, context_id.
+	if len(result.Content) < 4 {
+		t.Fatalf("expected at least 4 content items, got %d", len(result.Content))
 	}
 
 	// First: the agent's status message.
@@ -730,10 +732,19 @@ func TestHandleSendMessage_InputRequired_ReturnsImmediately(t *testing.T) {
 		t.Errorf("expected state indicator %q, got %q", "state:input-required", stateContent.Text)
 	}
 
-	// Third: context_id.
-	ctxContent, ok := result.Content[2].(*mcp.TextContent)
+	// Third: task_id.
+	taskIDContent, ok := result.Content[2].(*mcp.TextContent)
 	if !ok {
 		t.Fatal("expected third content to be TextContent")
+	}
+	if taskIDContent.Text != "task_id:task-input-1" {
+		t.Errorf("expected task_id %q, got %q", "task_id:task-input-1", taskIDContent.Text)
+	}
+
+	// Fourth: context_id.
+	ctxContent, ok := result.Content[3].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected fourth content to be TextContent")
 	}
 	if ctxContent.Text != "context_id:ctx-input-1" {
 		t.Errorf("expected context_id %q, got %q", "context_id:ctx-input-1", ctxContent.Text)
@@ -748,6 +759,7 @@ func TestHandleSendMessage_InputRequired_ReturnsImmediately(t *testing.T) {
 func TestHandleSendMessage_InputRequired_NoStatusMessage_UsesArtifacts(t *testing.T) {
 	// Agent returns input-required with no status message but with artifacts.
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID:        "task-input-2",
 			ContextID: "ctx-input-2",
@@ -758,8 +770,7 @@ func TestHandleSendMessage_InputRequired_NoStatusMessage_UsesArtifacts(t *testin
 				{Parts: a2a.ContentParts{a2a.NewTextPart("What is your name?")}},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -792,6 +803,7 @@ func TestHandleSendMessage_InputRequired_DoesNotPoll(t *testing.T) {
 	// Verify that input-required does NOT trigger polling (only 1 HTTP call).
 	var callCount int
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		callCount++
 		task := &a2a.Task{
 			ID:        "task-input-3",
@@ -801,8 +813,7 @@ func TestHandleSendMessage_InputRequired_DoesNotPoll(t *testing.T) {
 				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("need more info")),
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -830,12 +841,13 @@ func TestHandleSendMessage_InputRequired_ResumableViaContextID(t *testing.T) {
 	// 2. Second send_message with context_id -> agent returns completed
 	var callCount int
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		callCount++
-		var req a2a.SendMessageRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		var params a2a.SendMessageRequest
+		_ = json.Unmarshal(req.Params, &params)
 
 		var task *a2a.Task
-		if req.Message.ContextID == "" {
+		if params.Message.ContextID == "" {
 			// First call: return input-required
 			task = &a2a.Task{
 				ID:        "task-multi-1",
@@ -856,8 +868,7 @@ func TestHandleSendMessage_InputRequired_ResumableViaContextID(t *testing.T) {
 				},
 			}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -914,13 +925,13 @@ func TestHandleSendMessage_NonTerminalState_NoTaskID_DoesNotPoll(t *testing.T) {
 	// attempt to poll because tasks/get requires a task ID.
 	var callCount int
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		callCount++
 		task := &a2a.Task{
 			// No ID — agent doesn't support tasks/get
 			Status: a2a.TaskStatus{State: a2a.TaskStateWorking},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
@@ -955,20 +966,21 @@ func TestHandleSendMessage_NonTerminalState_NoTaskID_DoesNotPoll(t *testing.T) {
 
 func TestHandleSendMessage_PollFailsOnNon2xx(t *testing.T) {
 	// Agent returns "working" on first call (with a task ID), but then returns
-	// 404 on the tasks/get poll — indicating it doesn't support that endpoint.
+	// an error on the tasks/get poll.
 	var callCount int
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		callCount++
 		if callCount == 1 {
+			// SendMessage: return working task in StreamResponse format.
 			task := &a2a.Task{
 				ID:     "task-no-get",
 				Status: a2a.TaskStatus{State: a2a.TaskStateWorking},
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(task)
+			writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 		} else {
-			// Agent doesn't support tasks/get
-			http.NotFound(w, r)
+			// GetTask: return JSON-RPC error (agent doesn't support get).
+			writeJSONRPCError(w, req.ID, -32601, "method not found")
 		}
 	}))
 	defer agent.Close()
@@ -1000,5 +1012,699 @@ func TestHandleSendMessage_PollFailsOnNon2xx(t *testing.T) {
 	// Should have made exactly 2 calls: initial + one failed poll attempt.
 	if callCount != 2 {
 		t.Errorf("expected exactly 2 HTTP calls, got %d", callCount)
+	}
+}
+
+func TestHandleSendMessage_AuthRequired_ReturnsImmediately(t *testing.T) {
+	// Agent returns auth-required with a status message explaining what auth is needed.
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		task := &a2a.Task{
+			ID:        "task-auth-1",
+			ContextID: "ctx-auth-1",
+			Status: a2a.TaskStatus{
+				State:   a2a.TaskStateAuthRequired,
+				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("Please authenticate with OAuth2 to access this resource")),
+			},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("auth-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "auth-agent",
+		Message: "access protected resource",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success for auth-required state, got error: %v", result.Content)
+	}
+
+	// Should contain: status message text, state indicator, task_id, context_id.
+	if len(result.Content) < 4 {
+		t.Fatalf("expected at least 4 content items, got %d", len(result.Content))
+	}
+
+	// First: the agent's status message.
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected first content to be TextContent")
+	}
+	if textContent.Text != "Please authenticate with OAuth2 to access this resource" {
+		t.Errorf("expected agent message %q, got %q", "Please authenticate with OAuth2 to access this resource", textContent.Text)
+	}
+
+	// Second: state indicator.
+	stateContent, ok := result.Content[1].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected second content to be TextContent")
+	}
+	if stateContent.Text != "state:auth-required" {
+		t.Errorf("expected state indicator %q, got %q", "state:auth-required", stateContent.Text)
+	}
+
+	// Third: task_id.
+	taskIDContent, ok := result.Content[2].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected third content to be TextContent")
+	}
+	if taskIDContent.Text != "task_id:task-auth-1" {
+		t.Errorf("expected task_id %q, got %q", "task_id:task-auth-1", taskIDContent.Text)
+	}
+
+	// Fourth: context_id.
+	ctxContent, ok := result.Content[3].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected fourth content to be TextContent")
+	}
+	if ctxContent.Text != "context_id:ctx-auth-1" {
+		t.Errorf("expected context_id %q, got %q", "context_id:ctx-auth-1", ctxContent.Text)
+	}
+
+	// Verify context store was updated.
+	if stored := srv.contextStore.Get("auth-agent"); stored != "ctx-auth-1" {
+		t.Errorf("expected context store to have %q, got %q", "ctx-auth-1", stored)
+	}
+}
+
+func TestHandleSendMessage_AuthRequired_DoesNotPoll(t *testing.T) {
+	// Verify that auth-required does NOT trigger polling (only 1 HTTP call).
+	var callCount int
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		callCount++
+		task := &a2a.Task{
+			ID:        "task-auth-2",
+			ContextID: "ctx-auth-2",
+			Status: a2a.TaskStatus{
+				State:   a2a.TaskStateAuthRequired,
+				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("need OAuth token")),
+			},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("auth-no-poll-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "auth-no-poll-agent",
+		Message: "do something",
+	}
+
+	_, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should only have made exactly 1 HTTP call (no polling).
+	if callCount != 1 {
+		t.Errorf("expected exactly 1 HTTP call (no polling), got %d", callCount)
+	}
+}
+
+func TestHandleSendMessage_AuthRequired_ContextStoreUpdate(t *testing.T) {
+	// Verify context store is updated when auth-required is returned with context_id.
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		task := &a2a.Task{
+			ID:        "task-auth-3",
+			ContextID: "ctx-auth-new",
+			Status: a2a.TaskStatus{
+				State:   a2a.TaskStateAuthRequired,
+				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("authenticate please")),
+			},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("auth-ctx-agent", agent.URL)
+	// Pre-store a different context_id.
+	srv.contextStore.Set("auth-ctx-agent", "ctx-old")
+
+	input := SendMessageInput{
+		Agent:   "auth-ctx-agent",
+		Message: "access resource",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success for auth-required state, got error")
+	}
+
+	// Context store should be updated with the response context_id.
+	if stored := srv.contextStore.Get("auth-ctx-agent"); stored != "ctx-auth-new" {
+		t.Errorf("expected context store to have %q, got %q", "ctx-auth-new", stored)
+	}
+}
+
+func TestHandleSendMessage_AuthRequired_AfterPolling(t *testing.T) {
+	// Agent returns "working" first, then auth-required on poll.
+	// Verifies that auth-required terminates polling.
+	var callCount int
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		callCount++
+		var task *a2a.Task
+		if callCount == 1 {
+			// SendMessage: return working task in StreamResponse.
+			task = &a2a.Task{
+				ID:        "task-auth-poll",
+				ContextID: "ctx-auth-poll",
+				Status:    a2a.TaskStatus{State: a2a.TaskStateWorking},
+			}
+			writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+		} else {
+			// GetTask: return auth-required (plain task).
+			task = &a2a.Task{
+				ID:        "task-auth-poll",
+				ContextID: "ctx-auth-poll",
+				Status: a2a.TaskStatus{
+					State:   a2a.TaskStateAuthRequired,
+					Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("auth needed after working")),
+				},
+			}
+			writeJSONRPCResult(w, req.ID, task)
+		}
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("auth-poll-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "auth-poll-agent",
+		Message: "do work",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success for auth-required after polling, got error: %v", result.Content)
+	}
+
+	// Should have state:auth-required indicator.
+	if len(result.Content) < 2 {
+		t.Fatalf("expected at least 2 content items, got %d", len(result.Content))
+	}
+
+	stateContent, ok := result.Content[1].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected second content to be TextContent")
+	}
+	if stateContent.Text != "state:auth-required" {
+		t.Errorf("expected state indicator %q, got %q", "state:auth-required", stateContent.Text)
+	}
+
+	// Verify polling happened (at least 2 calls: initial + poll).
+	if callCount < 2 {
+		t.Errorf("expected at least 2 HTTP calls (initial + poll), got %d", callCount)
+	}
+}
+
+// --- Tests for Task 3: Message-only response detection and handling ---
+
+func TestHandleSendMessage_MessageResponse_WithText(t *testing.T) {
+	// Agent returns a direct Message response (no Task lifecycle).
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("Hello from a simple agent"))
+		writeJSONRPCResult(w, req.ID, jsonrpcMessageResult(msg))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("msg-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "msg-agent",
+		Message: "hi",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	// Should have 1 content item: the text.
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(result.Content))
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	if textContent.Text != "Hello from a simple agent" {
+		t.Errorf("expected %q, got %q", "Hello from a simple agent", textContent.Text)
+	}
+}
+
+func TestHandleSendMessage_MessageResponse_WithContextID(t *testing.T) {
+	// Agent returns a Message with a context_id.
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("reply with context"))
+		msg.ContextID = "ctx-msg-1"
+		writeJSONRPCResult(w, req.ID, jsonrpcMessageResult(msg))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("msg-ctx-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "msg-ctx-agent",
+		Message: "hello",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	// Should have 2 content items: text + context_id.
+	if len(result.Content) != 2 {
+		t.Fatalf("expected 2 content items, got %d", len(result.Content))
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected first content to be TextContent")
+	}
+	if textContent.Text != "reply with context" {
+		t.Errorf("expected %q, got %q", "reply with context", textContent.Text)
+	}
+
+	ctxContent, ok := result.Content[1].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected second content to be TextContent")
+	}
+	if ctxContent.Text != "context_id:ctx-msg-1" {
+		t.Errorf("expected %q, got %q", "context_id:ctx-msg-1", ctxContent.Text)
+	}
+
+	// Verify context store was updated.
+	if stored := srv.contextStore.Get("msg-ctx-agent"); stored != "ctx-msg-1" {
+		t.Errorf("expected context store to have %q, got %q", "ctx-msg-1", stored)
+	}
+}
+
+func TestHandleSendMessage_MessageResponse_NonTextParts(t *testing.T) {
+	// Agent returns a Message with only non-text parts.
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		msg := &a2a.Message{
+			Role:  a2a.MessageRoleAgent,
+			Parts: a2a.ContentParts{a2a.NewDataPart(map[string]any{"key": "value"})},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcMessageResult(msg))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("msg-nontext-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "msg-nontext-agent",
+		Message: "give me data",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	if len(result.Content) < 1 {
+		t.Fatal("expected at least 1 content item")
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	expected := "response contained non-text content that cannot be displayed"
+	if textContent.Text != expected {
+		t.Errorf("expected %q, got %q", expected, textContent.Text)
+	}
+}
+
+func TestHandleSendMessage_UnrecognizedResponse(t *testing.T) {
+	// Agent returns a JSON-RPC error, which the SDK surfaces as an error.
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		writeJSONRPCError(w, req.ID, -32603, "internal error")
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("bad-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "bad-agent",
+		Message: "hello",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for agent returning JSON-RPC error")
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	if textContent.Text == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+func TestHandleSendMessage_MessageResponse_URLBased_NoContextStoreUpdate(t *testing.T) {
+	// When using a URL directly (not alias), context store should not be updated
+	// even if the Message has a context_id.
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("url response"))
+		msg.ContextID = "ctx-url-msg"
+		writeJSONRPCResult(w, req.ID, jsonrpcMessageResult(msg))
+	}))
+	defer agent.Close()
+
+	srv := NewServer()
+
+	input := SendMessageInput{
+		Agent:   agent.URL, // URL directly, not alias
+		Message: "hello",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	// The response should still include the context_id content item.
+	if len(result.Content) != 2 {
+		t.Fatalf("expected 2 content items, got %d", len(result.Content))
+	}
+	ctxContent, ok := result.Content[1].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected second content to be TextContent")
+	}
+	if ctxContent.Text != "context_id:ctx-url-msg" {
+		t.Errorf("expected %q, got %q", "context_id:ctx-url-msg", ctxContent.Text)
+	}
+
+	// Context store should NOT have anything stored for the URL.
+	if stored := srv.contextStore.Get(agent.URL); stored != "" {
+		t.Errorf("expected no context store entry for URL, got %q", stored)
+	}
+}
+
+func TestHandleSendMessage_MessageResponse_MultipleTextParts(t *testing.T) {
+	// Agent returns a Message with multiple text parts - they should be concatenated.
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		msg := &a2a.Message{
+			Role: a2a.MessageRoleAgent,
+			Parts: a2a.ContentParts{
+				a2a.NewTextPart("Part one. "),
+				a2a.NewTextPart("Part two."),
+			},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcMessageResult(msg))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("msg-multi-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "msg-multi-agent",
+		Message: "hello",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	if textContent.Text != "Part one. Part two." {
+		t.Errorf("expected %q, got %q", "Part one. Part two.", textContent.Text)
+	}
+}
+
+// --- Tests for Task 4: task_id parameter in send_message ---
+
+func TestHandleSendMessage_WithTaskID(t *testing.T) {
+	// Verify that task_id is included in the A2A Message sent to the agent.
+	var receivedTaskID string
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		var params a2a.SendMessageRequest
+		_ = json.Unmarshal(req.Params, &params)
+		receivedTaskID = string(params.Message.TaskID)
+
+		task := &a2a.Task{
+			ID:        "task-tid-1",
+			ContextID: "ctx-tid-1",
+			Status:    a2a.TaskStatus{State: a2a.TaskStateCompleted},
+			Artifacts: []*a2a.Artifact{
+				{Parts: a2a.ContentParts{a2a.NewTextPart("task continued")}},
+			},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("taskid-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "taskid-agent",
+		Message: "continue the task",
+		TaskID:  "existing-task-123",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	// Verify that the task_id was sent to the agent.
+	if receivedTaskID != "existing-task-123" {
+		t.Errorf("expected agent to receive task_id %q, got %q", "existing-task-123", receivedTaskID)
+	}
+
+	// Verify no context_id was sent (task_id only, no explicit or stored context).
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	if textContent.Text != "task continued" {
+		t.Errorf("expected %q, got %q", "task continued", textContent.Text)
+	}
+}
+
+func TestHandleSendMessage_WithTaskID_NoContextID(t *testing.T) {
+	// Verify that when task_id is provided without context_id, only task_id
+	// appears in the message (context_id is empty).
+	var receivedTaskID string
+	var receivedContextID string
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		var params a2a.SendMessageRequest
+		_ = json.Unmarshal(req.Params, &params)
+		receivedTaskID = string(params.Message.TaskID)
+		receivedContextID = params.Message.ContextID
+
+		task := &a2a.Task{
+			ID:        "task-tid-2",
+			ContextID: "ctx-tid-2",
+			Status:    a2a.TaskStatus{State: a2a.TaskStateCompleted},
+			Artifacts: []*a2a.Artifact{
+				{Parts: a2a.ContentParts{a2a.NewTextPart("ok")}},
+			},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("taskid-only-agent", agent.URL)
+	// No stored context — ensure no context_id leaks in.
+
+	input := SendMessageInput{
+		Agent:   "taskid-only-agent",
+		Message: "follow up on task",
+		TaskID:  "task-abc",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	// task_id should be present.
+	if receivedTaskID != "task-abc" {
+		t.Errorf("expected agent to receive task_id %q, got %q", "task-abc", receivedTaskID)
+	}
+
+	// context_id should be empty (no explicit and no stored context).
+	if receivedContextID != "" {
+		t.Errorf("expected empty context_id when only task_id is provided, got %q", receivedContextID)
+	}
+}
+
+func TestHandleSendMessage_WithTaskID_AndContextID(t *testing.T) {
+	// Verify that when both task_id and context_id are provided, both appear
+	// in the message sent to the agent.
+	var receivedTaskID string
+	var receivedContextID string
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		var params a2a.SendMessageRequest
+		_ = json.Unmarshal(req.Params, &params)
+		receivedTaskID = string(params.Message.TaskID)
+		receivedContextID = params.Message.ContextID
+
+		task := &a2a.Task{
+			ID:        "task-tid-3",
+			ContextID: "ctx-tid-3",
+			Status:    a2a.TaskStatus{State: a2a.TaskStateCompleted},
+			Artifacts: []*a2a.Artifact{
+				{Parts: a2a.ContentParts{a2a.NewTextPart("both provided")}},
+			},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("taskid-both-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:     "taskid-both-agent",
+		Message:   "continue with both ids",
+		TaskID:    "task-xyz",
+		ContextID: "ctx-explicit-xyz",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	// Both task_id and context_id should be present in the sent message.
+	if receivedTaskID != "task-xyz" {
+		t.Errorf("expected agent to receive task_id %q, got %q", "task-xyz", receivedTaskID)
+	}
+	if receivedContextID != "ctx-explicit-xyz" {
+		t.Errorf("expected agent to receive context_id %q, got %q", "ctx-explicit-xyz", receivedContextID)
+	}
+
+	// Verify the response content.
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	if textContent.Text != "both provided" {
+		t.Errorf("expected %q, got %q", "both provided", textContent.Text)
+	}
+}
+
+func TestHandleSendMessage_WithTaskID_VerifyJSONBody(t *testing.T) {
+	// Verify that task_id actually appears in the raw JSON body sent to the agent.
+	var rawBody []byte
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ = io.ReadAll(r.Body)
+
+		// Parse to get the ID for the response.
+		var rpcReq jsonrpcTestRequest
+		_ = json.Unmarshal(rawBody, &rpcReq)
+
+		task := &a2a.Task{
+			ID:     "task-tid-4",
+			Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+			Artifacts: []*a2a.Artifact{
+				{Parts: a2a.ContentParts{a2a.NewTextPart("verified")}},
+			},
+		}
+		writeJSONRPCResult(w, rpcReq.ID, jsonrpcTaskResult(task))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("taskid-json-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "taskid-json-agent",
+		Message: "verify json",
+		TaskID:  "my-task-id-999",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	// Parse the raw JSON to verify task_id is present in the params.
+	var bodyMap map[string]any
+	if err := json.Unmarshal(rawBody, &bodyMap); err != nil {
+		t.Fatalf("failed to parse request body: %v", err)
+	}
+
+	// The body is a JSON-RPC envelope: {"jsonrpc":"2.0","method":"...","params":{...},"id":"..."}
+	paramsRaw, ok := bodyMap["params"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 'params' field in JSON-RPC request body")
+	}
+
+	msgMap, ok := paramsRaw["message"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 'message' field in params")
+	}
+
+	taskID, ok := msgMap["taskId"]
+	if !ok {
+		t.Fatal("expected 'taskId' field in message JSON body")
+	}
+	if taskID != "my-task-id-999" {
+		t.Errorf("expected taskId %q in JSON body, got %q", "my-task-id-999", taskID)
 	}
 }

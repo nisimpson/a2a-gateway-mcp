@@ -9,6 +9,7 @@
 //
 // This exercises the gateway's handling of input-required as a turn-terminal
 // state and context_id-based conversation resumption.
+// All operations use JSON-RPC 2.0 envelopes per A2A spec §9.
 package main
 
 import (
@@ -26,6 +27,22 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 )
+
+// jsonrpcRequest represents an incoming JSON-RPC 2.0 request envelope.
+type jsonrpcRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params"`
+	ID      any             `json:"id"`
+}
+
+// jsonrpcResponse represents an outgoing JSON-RPC 2.0 response envelope.
+type jsonrpcResponse struct {
+	JSONRPC string `json:"jsonrpc"`
+	ID      any    `json:"id"`
+	Result  any    `json:"result,omitempty"`
+	Error   any    `json:"error,omitempty"`
+}
 
 func main() {
 	var port int
@@ -124,7 +141,7 @@ func (s *knockKnockServer) agentCard() a2a.AgentCard {
 		SupportedInterfaces: []*a2a.AgentInterface{
 			a2a.NewAgentInterface(
 				fmt.Sprintf("http://localhost:%d/", s.port),
-				a2a.TransportProtocolHTTPJSON,
+				a2a.TransportProtocolJSONRPC,
 			),
 		},
 		DefaultInputModes:  []string{"text/plain"},
@@ -147,22 +164,45 @@ func (s *knockKnockServer) handleAgentCard(w http.ResponseWriter, _ *http.Reques
 	_ = json.NewEncoder(w).Encode(s.agentCard())
 }
 
+// handlePost parses incoming JSON-RPC 2.0 requests and routes by method name.
 func (s *knockKnockServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") != "application/json" {
 		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 		return
 	}
 
-	var req a2a.SendMessageRequest
+	var req jsonrpcRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		s.writeJSONRPCError(w, nil, -32700, "parse error")
+		return
+	}
+
+	if req.JSONRPC != "2.0" {
+		s.writeJSONRPCError(w, req.ID, -32600, "invalid request: missing jsonrpc 2.0")
+		return
+	}
+
+	switch req.Method {
+	case "SendMessage":
+		s.handleSendMessage(w, &req)
+	default:
+		s.writeJSONRPCError(w, req.ID, -32601, fmt.Sprintf("method not found: %s", req.Method))
+	}
+}
+
+// handleSendMessage processes a SendMessage JSON-RPC request for the multi-turn
+// knock-knock joke conversation.
+func (s *knockKnockServer) handleSendMessage(w http.ResponseWriter, req *jsonrpcRequest) {
+	var sendReq a2a.SendMessageRequest
+	if err := json.Unmarshal(req.Params, &sendReq); err != nil {
+		s.writeJSONRPCError(w, req.ID, -32602, fmt.Sprintf("invalid params: %v", err))
 		return
 	}
 
 	// Extract user text.
 	userText := ""
-	if req.Message != nil {
-		for _, part := range req.Message.Parts {
+	if sendReq.Message != nil {
+		for _, part := range sendReq.Message.Parts {
 			if part != nil {
 				if t := part.Text(); t != "" {
 					userText = t
@@ -175,8 +215,8 @@ func (s *knockKnockServer) handlePost(w http.ResponseWriter, r *http.Request) {
 
 	// Determine context_id.
 	contextID := ""
-	if req.Message != nil {
-		contextID = req.Message.ContextID
+	if sendReq.Message != nil {
+		contextID = sendReq.Message.ContextID
 	}
 	if contextID == "" {
 		contextID = a2a.NewContextID()
@@ -256,8 +296,38 @@ func (s *knockKnockServer) handlePost(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(task)
+	// Wrap in StreamResponse format that the SDK expects for SendMessage.
+	result := map[string]any{
+		"kind": "task",
+		"task": task,
+	}
+
+	s.writeJSONRPCResult(w, req.ID, result)
 
 	_ = userText // logged above for context
+}
+
+// writeJSONRPCResult writes a successful JSON-RPC response.
+func (s *knockKnockServer) writeJSONRPCResult(w http.ResponseWriter, id any, result any) {
+	resp := jsonrpcResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result:  result,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// writeJSONRPCError writes a JSON-RPC error response.
+func (s *knockKnockServer) writeJSONRPCError(w http.ResponseWriter, id any, code int, message string) {
+	resp := jsonrpcResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error: map[string]any{
+			"code":    code,
+			"message": message,
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }

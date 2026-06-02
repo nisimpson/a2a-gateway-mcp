@@ -1,12 +1,9 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"sync"
 	"time"
 
@@ -107,63 +104,64 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, ti
 	agentCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
-	// Build A2A message request.
+	// Resolve SDK client for this agent.
+	resolved := &ResolveResult{URL: entry.URL, IsAlias: true, Headers: entry.Headers}
+	a2aClient, err := s.clients.Resolve(agentCtx, resolved)
+	if err != nil {
+		return &broadcastResult{
+			Status: "error",
+			Error:  fmt.Sprintf("failed to resolve client: %v", err),
+		}
+	}
+
+	// Build and send A2A message.
 	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(message))
 	sendReq := &a2a.SendMessageRequest{
 		Message: msg,
 	}
 
-	// Serialize the request body.
-	reqBody, err := json.Marshal(sendReq)
+	result, err := a2aClient.SendMessage(agentCtx, sendReq)
 	if err != nil {
 		return &broadcastResult{
 			Status: "error",
-			Error:  fmt.Sprintf("failed to serialize request: %v", err),
+			Error:  err.Error(),
 		}
 	}
 
-	// Get HTTP client with agent headers.
-	client := httpClientForAgent(s.httpClient, entry)
+	// Type switch on result.
+	switch v := result.(type) {
+	case *a2a.Message:
+		text, hasTextParts := extractTextFromMessageParts(v.Parts)
+		if hasTextParts {
+			return &broadcastResult{
+				Status:   "success",
+				Response: text,
+			}
+		}
+		if len(v.Parts) > 0 {
+			return &broadcastResult{
+				Status:   "success",
+				Response: "response contained non-text content that cannot be displayed",
+			}
+		}
+		return &broadcastResult{
+			Status:   "success",
+			Response: "",
+		}
 
-	// Send HTTP POST to agent URL.
-	httpReq, err := http.NewRequestWithContext(agentCtx, http.MethodPost, entry.URL, bytes.NewReader(reqBody))
-	if err != nil {
+	case *a2a.Task:
+		return s.handleBroadcastTaskResult(v)
+
+	default:
 		return &broadcastResult{
 			Status: "error",
-			Error:  fmt.Sprintf("failed to create request: %v", err),
+			Error:  "unrecognized response format",
 		}
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json")
+}
 
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return &broadcastResult{
-			Status: "error",
-			Error:  fmt.Sprintf("agent unreachable: %v", err),
-		}
-	}
-	defer resp.Body.Close()
-
-	// Read response body.
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return &broadcastResult{
-			Status: "error",
-			Error:  fmt.Sprintf("failed to read response: %v", err),
-		}
-	}
-
-	// Parse the response as a Task.
-	var task a2a.Task
-	if err := json.Unmarshal(body, &task); err != nil {
-		return &broadcastResult{
-			Status: "error",
-			Error:  fmt.Sprintf("failed to parse response: %v", err),
-		}
-	}
-
-	// Handle task states.
+// handleBroadcastTaskResult processes a task result in the broadcast context.
+func (s *Server) handleBroadcastTaskResult(task *a2a.Task) *broadcastResult {
 	switch task.Status.State {
 	case a2a.TaskStateCompleted:
 		text, _ := extractTextFromArtifacts(task.Artifacts)
@@ -172,7 +170,6 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, ti
 			Response: text,
 		}
 	case a2a.TaskStateInputRequired:
-		// input-required is terminal for the current turn; surface the agent's message.
 		responseText := ""
 		if task.Status.Message != nil {
 			responseText = extractStatusMessageText(task.Status.Message)
@@ -183,6 +180,19 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, ti
 		}
 		return &broadcastResult{
 			Status:   "input-required",
+			Response: responseText,
+		}
+	case a2a.TaskStateAuthRequired:
+		responseText := ""
+		if task.Status.Message != nil {
+			responseText = extractStatusMessageText(task.Status.Message)
+		}
+		if responseText == "" {
+			text, _ := extractTextFromArtifacts(task.Artifacts)
+			responseText = text
+		}
+		return &broadcastResult{
+			Status:   "auth-required",
 			Response: responseText,
 		}
 	case a2a.TaskStateFailed:

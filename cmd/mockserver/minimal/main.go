@@ -2,7 +2,8 @@
 
 // Package main provides a mock A2A server for testing the a2a-gateway-mcp client.
 // It implements the minimum A2A protocol surface: agent card discovery, message
-// handling (echo), task retrieval, and an agent directory endpoint.
+// handling (echo), task retrieval, task cancellation, and an agent directory endpoint.
+// All operations use JSON-RPC 2.0 envelopes per A2A spec §9.
 package main
 
 import (
@@ -20,6 +21,22 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/nisimpson/a2a-gateway-mcp/directory"
 )
+
+// jsonrpcRequest represents an incoming JSON-RPC 2.0 request envelope.
+type jsonrpcRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params"`
+	ID      any             `json:"id"`
+}
+
+// jsonrpcResponse represents an outgoing JSON-RPC 2.0 response envelope.
+type jsonrpcResponse struct {
+	JSONRPC string `json:"jsonrpc"`
+	ID      any    `json:"id"`
+	Result  any    `json:"result,omitempty"`
+	Error   any    `json:"error,omitempty"`
+}
 
 func main() {
 	var (
@@ -58,7 +75,7 @@ func main() {
 }
 
 // mockServer is a minimal A2A-compliant server that echoes messages back
-// and serves an agent directory.
+// and serves an agent directory. Uses JSON-RPC 2.0 envelopes per §9.
 type mockServer struct {
 	name       string
 	port       int
@@ -109,7 +126,7 @@ func (s *mockServer) agentCard() a2a.AgentCard {
 		SupportedInterfaces: []*a2a.AgentInterface{
 			a2a.NewAgentInterface(
 				fmt.Sprintf("http://localhost:%d/", s.port),
-				a2a.TransportProtocolHTTPJSON,
+				a2a.TransportProtocolJSONRPC,
 			),
 		},
 		DefaultInputModes:  []string{"text/plain"},
@@ -134,51 +151,49 @@ func (s *mockServer) handleAgentCard(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(card)
 }
 
-// handlePost routes POST requests based on the JSON body content.
-// It distinguishes between SendMessageRequest and GetTaskRequest.
+// handlePost parses incoming JSON-RPC 2.0 requests and routes by method name.
 func (s *mockServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") != "application/json" {
 		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 		return
 	}
 
-	// Decode into a generic map to determine request type.
-	var raw map[string]json.RawMessage
-	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+	var req jsonrpcRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeJSONRPCError(w, nil, -32700, "parse error")
 		return
 	}
 
-	// If the body has a "message" field, it's a SendMessageRequest.
-	// If it has an "id" field (without "message"), it's a GetTaskRequest.
-	if _, ok := raw["message"]; ok {
-		s.handleSendMessage(w, raw)
+	if req.JSONRPC != "2.0" {
+		s.writeJSONRPCError(w, req.ID, -32600, "invalid request: missing jsonrpc 2.0")
 		return
 	}
 
-	if _, ok := raw["id"]; ok {
-		s.handleGetTask(w, raw)
-		return
+	switch req.Method {
+	case "SendMessage":
+		s.handleSendMessage(w, &req)
+	case "GetTask":
+		s.handleGetTask(w, &req)
+	case "CancelTask":
+		s.handleCancelTask(w, &req)
+	default:
+		s.writeJSONRPCError(w, req.ID, -32601, fmt.Sprintf("method not found: %s", req.Method))
 	}
-
-	http.Error(w, "unrecognized request format", http.StatusBadRequest)
 }
 
-// handleSendMessage processes a SendMessageRequest and returns a completed Task
+// handleSendMessage processes a SendMessage JSON-RPC request and returns a completed Task
 // that echoes the user's message.
-func (s *mockServer) handleSendMessage(w http.ResponseWriter, raw map[string]json.RawMessage) {
-	// Re-marshal and decode as SendMessageRequest.
-	data, _ := json.Marshal(raw)
-	var req a2a.SendMessageRequest
-	if err := json.Unmarshal(data, &req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid SendMessageRequest: %v", err), http.StatusBadRequest)
+func (s *mockServer) handleSendMessage(w http.ResponseWriter, req *jsonrpcRequest) {
+	var sendReq a2a.SendMessageRequest
+	if err := json.Unmarshal(req.Params, &sendReq); err != nil {
+		s.writeJSONRPCError(w, req.ID, -32602, fmt.Sprintf("invalid params: %v", err))
 		return
 	}
 
 	// Extract the user's text from the message parts.
 	userText := ""
-	if req.Message != nil {
-		for _, part := range req.Message.Parts {
+	if sendReq.Message != nil {
+		for _, part := range sendReq.Message.Parts {
 			if part != nil {
 				if t := part.Text(); t != "" {
 					userText = t
@@ -190,8 +205,8 @@ func (s *mockServer) handleSendMessage(w http.ResponseWriter, raw map[string]jso
 
 	// Determine context ID: use the one from the message or generate a new one.
 	contextID := ""
-	if req.Message != nil {
-		contextID = req.Message.ContextID
+	if sendReq.Message != nil {
+		contextID = sendReq.Message.ContextID
 	}
 	if contextID == "" {
 		contextID = a2a.NewContextID()
@@ -222,28 +237,92 @@ func (s *mockServer) handleSendMessage(w http.ResponseWriter, raw map[string]jso
 
 	log.Printf("handled message: %q -> task %s", userText, task.ID)
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(task)
+	// Wrap in StreamResponse format that the SDK expects for SendMessage.
+	result := map[string]any{
+		"kind": "task",
+		"task": task,
+	}
+
+	s.writeJSONRPCResult(w, req.ID, result)
 }
 
-// handleGetTask processes a GetTaskRequest and returns the stored task.
-func (s *mockServer) handleGetTask(w http.ResponseWriter, raw map[string]json.RawMessage) {
-	data, _ := json.Marshal(raw)
-	var req a2a.GetTaskRequest
-	if err := json.Unmarshal(data, &req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid GetTaskRequest: %v", err), http.StatusBadRequest)
+// handleGetTask processes a GetTask JSON-RPC request and returns the stored task.
+func (s *mockServer) handleGetTask(w http.ResponseWriter, req *jsonrpcRequest) {
+	var getReq a2a.GetTaskRequest
+	if err := json.Unmarshal(req.Params, &getReq); err != nil {
+		s.writeJSONRPCError(w, req.ID, -32602, fmt.Sprintf("invalid params: %v", err))
 		return
 	}
 
 	s.mu.RLock()
-	task, ok := s.tasks[req.ID]
+	task, ok := s.tasks[getReq.ID]
 	s.mu.RUnlock()
 
 	if !ok {
-		http.Error(w, fmt.Sprintf("task %s not found", req.ID), http.StatusNotFound)
+		s.writeJSONRPCError(w, req.ID, -32001, "task not found")
 		return
 	}
 
+	// GetTask returns the task directly as the result (no StreamResponse wrapper).
+	s.writeJSONRPCResult(w, req.ID, task)
+}
+
+// handleCancelTask processes a CancelTask JSON-RPC request.
+func (s *mockServer) handleCancelTask(w http.ResponseWriter, req *jsonrpcRequest) {
+	var cancelReq a2a.CancelTaskRequest
+	if err := json.Unmarshal(req.Params, &cancelReq); err != nil {
+		s.writeJSONRPCError(w, req.ID, -32602, fmt.Sprintf("invalid params: %v", err))
+		return
+	}
+
+	s.mu.Lock()
+	task, ok := s.tasks[cancelReq.ID]
+	if !ok {
+		s.mu.Unlock()
+		s.writeJSONRPCError(w, req.ID, -32001, "task not found")
+		return
+	}
+
+	// If the task is already in a terminal state, it's not cancelable.
+	if task.Status.State == a2a.TaskStateCompleted || task.Status.State == a2a.TaskStateFailed {
+		s.mu.Unlock()
+		s.writeJSONRPCError(w, req.ID, -32002, "task is not cancelable")
+		return
+	}
+
+	// Cancel the task.
+	now := time.Now()
+	task.Status = a2a.TaskStatus{
+		State:     a2a.TaskStateCanceled,
+		Timestamp: &now,
+	}
+	s.mu.Unlock()
+
+	// CancelTask returns the task directly as the result.
+	s.writeJSONRPCResult(w, req.ID, task)
+}
+
+// writeJSONRPCResult writes a successful JSON-RPC response.
+func (s *mockServer) writeJSONRPCResult(w http.ResponseWriter, id any, result any) {
+	resp := jsonrpcResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result:  result,
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(task)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// writeJSONRPCError writes a JSON-RPC error response.
+func (s *mockServer) writeJSONRPCError(w http.ResponseWriter, id any, code int, message string) {
+	resp := jsonrpcResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error: map[string]any{
+			"code":    code,
+			"message": message,
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
