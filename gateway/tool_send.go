@@ -1,15 +1,12 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -56,91 +53,70 @@ func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 	if contextID != "" {
 		msg.ContextID = contextID
 	}
+	if input.TaskID != "" {
+		msg.TaskID = a2a.TaskID(input.TaskID)
+	}
 
 	// Build SendMessageRequest.
 	sendReq := &a2a.SendMessageRequest{
 		Message: msg,
 	}
 
-	// Serialize the request body.
-	reqBody, err := json.Marshal(sendReq)
+	// Resolve SDK client.
+	a2aClient, err := s.clients.Resolve(ctx, resolved)
 	if err != nil {
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("failed to serialize request: %v", err)}},
-		}, nil, nil
+		return handleA2AError(err), nil, nil
 	}
 
-	// Determine which HTTP client to use.
-	client := s.httpClient
-	if resolved.IsAlias {
-		entry := s.registry.Lookup(input.Agent)
-		if entry != nil {
-			client = httpClientForAgent(s.httpClient, entry)
+	// Call SDK client.
+	result, err := a2aClient.SendMessage(ctx, sendReq)
+	if err != nil {
+		return handleA2AError(err), nil, nil
+	}
+
+	// Type switch on result.
+	switch v := result.(type) {
+	case *a2a.Task:
+		return s.handleTaskResult(ctx, a2aClient, v, resolved, input.Agent)
+	case *a2a.Message:
+		// Store context_id if alias-based.
+		if resolved.IsAlias && v.ContextID != "" {
+			s.contextStore.Set(input.Agent, v.ContextID)
 		}
-	}
-
-	// Send HTTP POST to the agent URL.
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, resolved.URL, bytes.NewReader(reqBody))
-	if err != nil {
+		return FormatMessageResponse(v), nil, nil
+	default:
 		return &mcp.CallToolResult{
 			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("failed to create request: %v", err)}},
+			Content: []mcp.Content{&mcp.TextContent{Text: "unrecognized response format: expected Task or Message"}},
 		}, nil, nil
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json")
+}
 
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("agent unreachable: %v", err)}},
-		}, nil, nil
-	}
-	defer resp.Body.Close()
-
-	// Read response body.
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("failed to read response: %v", err)}},
-		}, nil, nil
-	}
-
-	// Parse the response. The A2A protocol returns either a Task or a Message.
-	// Try parsing as a Task first (most common for send_message).
-	var task a2a.Task
-	if err := json.Unmarshal(body, &task); err != nil {
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("failed to parse response: %v", err)}},
-		}, nil, nil
-	}
-
-	// Handle task states.
+// handleTaskResult processes a *a2a.Task result from SendMessage, handling
+// all task states including polling for non-terminal states.
+func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Client, task *a2a.Task, resolved *ResolveResult, agent string) (*mcp.CallToolResult, any, error) {
 	switch task.Status.State {
 	case a2a.TaskStateCompleted:
-		// Update context store with returned context_id (only for alias-based requests).
 		if resolved.IsAlias && task.ContextID != "" {
-			s.contextStore.Set(input.Agent, task.ContextID)
+			s.contextStore.Set(agent, task.ContextID)
 		}
-		return FormatTaskResponse(&task), nil, nil
+		return FormatTaskResponse(task), nil, nil
 
 	case a2a.TaskStateInputRequired:
-		// input-required is a terminal state for the current turn — the agent
-		// needs additional input from the caller before it can proceed. Return
-		// immediately so the caller can provide follow-up input via context_id.
 		if resolved.IsAlias && task.ContextID != "" {
-			s.contextStore.Set(input.Agent, task.ContextID)
+			s.contextStore.Set(agent, task.ContextID)
 		}
-		return FormatInputRequiredResponse(&task), nil, nil
+		return FormatInputRequiredResponse(task), nil, nil
+
+	case a2a.TaskStateAuthRequired:
+		if resolved.IsAlias && task.ContextID != "" {
+			s.contextStore.Set(agent, task.ContextID)
+		}
+		return FormatInterruptedResponse(task, "auth-required"), nil, nil
 
 	case a2a.TaskStateFailed:
-		// Update context store even on failure if context_id is present.
 		if resolved.IsAlias && task.ContextID != "" {
-			s.contextStore.Set(input.Agent, task.ContextID)
+			s.contextStore.Set(agent, task.ContextID)
 		}
 		failMsg := "task failed"
 		if task.Status.Message != nil {
@@ -155,9 +131,8 @@ func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 		}, nil, nil
 
 	case a2a.TaskStateCanceled:
-		// Update context store even on cancel if context_id is present.
 		if resolved.IsAlias && task.ContextID != "" {
-			s.contextStore.Set(input.Agent, task.ContextID)
+			s.contextStore.Set(agent, task.ContextID)
 		}
 		return &mcp.CallToolResult{
 			IsError: true,
@@ -166,10 +141,9 @@ func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 
 	default:
 		// Guard: if the task has no ID, the agent likely doesn't support tasks/get.
-		// Treat the current response as final rather than attempting to poll.
 		if task.ID == "" {
 			if resolved.IsAlias && task.ContextID != "" {
-				s.contextStore.Set(input.Agent, task.ContextID)
+				s.contextStore.Set(agent, task.ContextID)
 			}
 			return &mcp.CallToolResult{
 				IsError: true,
@@ -178,26 +152,29 @@ func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 		}
 
 		// Poll up to 60s for non-terminal states (e.g. working, submitted).
-		task, err := s.pollTaskCompletion(ctx, client, resolved.URL, task.ID)
+		polledTask, err := s.pollTaskCompletion(ctx, a2aClient, task.ID)
 		if err != nil {
 			return &mcp.CallToolResult{
 				IsError: true,
 				Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
 			}, nil, nil
 		}
+
 		// Re-evaluate the terminal state after polling.
-		if resolved.IsAlias && task.ContextID != "" {
-			s.contextStore.Set(input.Agent, task.ContextID)
+		if resolved.IsAlias && polledTask.ContextID != "" {
+			s.contextStore.Set(agent, polledTask.ContextID)
 		}
-		switch task.Status.State {
+		switch polledTask.Status.State {
 		case a2a.TaskStateCompleted:
-			return FormatTaskResponse(task), nil, nil
+			return FormatTaskResponse(polledTask), nil, nil
 		case a2a.TaskStateInputRequired:
-			return FormatInputRequiredResponse(task), nil, nil
+			return FormatInputRequiredResponse(polledTask), nil, nil
+		case a2a.TaskStateAuthRequired:
+			return FormatInterruptedResponse(polledTask, "auth-required"), nil, nil
 		case a2a.TaskStateFailed:
 			failMsg := "task failed"
-			if task.Status.Message != nil {
-				text := extractStatusMessageText(task.Status.Message)
+			if polledTask.Status.Message != nil {
+				text := extractStatusMessageText(polledTask.Status.Message)
 				if text != "" {
 					failMsg = text
 				}
@@ -214,7 +191,7 @@ func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 		default:
 			return &mcp.CallToolResult{
 				IsError: true,
-				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("timeout waiting for task completion (state: %s)", task.Status.State)}},
+				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("timeout waiting for task completion (state: %s)", polledTask.Status.State)}},
 			}, nil, nil
 		}
 	}
@@ -222,7 +199,7 @@ func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 
 // pollTaskCompletion polls the agent for task status every 2s until a terminal
 // state is reached or 60s elapses.
-func (s *Server) pollTaskCompletion(ctx context.Context, client *http.Client, agentURL string, taskID a2a.TaskID) (*a2a.Task, error) {
+func (s *Server) pollTaskCompletion(ctx context.Context, a2aClient *a2aclient.Client, taskID a2a.TaskID) (*a2a.Task, error) {
 	deadline := time.Now().Add(taskPollTimeout)
 	ticker := time.NewTicker(taskPollInterval)
 	defer ticker.Stop()
@@ -236,57 +213,18 @@ func (s *Server) pollTaskCompletion(ctx context.Context, client *http.Client, ag
 				return nil, fmt.Errorf("timeout waiting for task completion after %s", taskPollTimeout)
 			}
 
-			task, err := s.getTaskStatus(ctx, client, agentURL, taskID)
+			task, err := a2aClient.GetTask(ctx, &a2a.GetTaskRequest{ID: taskID})
 			if err != nil {
 				return nil, fmt.Errorf("failed to poll task status: %v", err)
 			}
 
 			switch task.Status.State {
-			case a2a.TaskStateCompleted, a2a.TaskStateFailed, a2a.TaskStateCanceled, a2a.TaskStateInputRequired:
+			case a2a.TaskStateCompleted, a2a.TaskStateFailed, a2a.TaskStateCanceled, a2a.TaskStateInputRequired, a2a.TaskStateAuthRequired:
 				return task, nil
 			}
 			// Still non-terminal, continue polling.
 		}
 	}
-}
-
-// getTaskStatus sends a tasks/get request to retrieve the current task state.
-func (s *Server) getTaskStatus(ctx context.Context, client *http.Client, agentURL string, taskID a2a.TaskID) (*a2a.Task, error) {
-	getReq := &a2a.GetTaskRequest{ID: taskID}
-	reqBody, err := json.Marshal(getReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize get task request: %v", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, agentURL, bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json")
-
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("agent unreachable: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// If the agent returns a non-2xx status, it likely doesn't support tasks/get.
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("agent does not support tasks/get (HTTP %d)", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %v", err)
-	}
-
-	var task a2a.Task
-	if err := json.Unmarshal(body, &task); err != nil {
-		return nil, fmt.Errorf("failed to parse task response: %v", err)
-	}
-
-	return &task, nil
 }
 
 // extractStatusMessageText extracts text from a task status message's parts.

@@ -438,3 +438,117 @@ func TestPropertyA2AResponseJSONRoundTrip(t *testing.T) {
 
 	properties.TestingRun(t)
 }
+
+// --- Tests for FormatMessageResponse ---
+
+func TestFormatMessageResponse_WithText(t *testing.T) {
+	msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("Hello world"))
+
+	result := FormatMessageResponse(msg)
+
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(result.Content))
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	if textContent.Text != "Hello world" {
+		t.Errorf("expected %q, got %q", "Hello world", textContent.Text)
+	}
+}
+
+func TestFormatMessageResponse_WithContextID(t *testing.T) {
+	msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("reply"))
+	msg.ContextID = "ctx-test-1"
+
+	result := FormatMessageResponse(msg)
+
+	if len(result.Content) != 2 {
+		t.Fatalf("expected 2 content items, got %d", len(result.Content))
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected first content to be TextContent")
+	}
+	if textContent.Text != "reply" {
+		t.Errorf("expected %q, got %q", "reply", textContent.Text)
+	}
+
+	ctxContent, ok := result.Content[1].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected second content to be TextContent")
+	}
+	if ctxContent.Text != "context_id:ctx-test-1" {
+		t.Errorf("expected %q, got %q", "context_id:ctx-test-1", ctxContent.Text)
+	}
+}
+
+func TestFormatMessageResponse_NonTextParts(t *testing.T) {
+	msg := &a2a.Message{
+		Role:  a2a.MessageRoleAgent,
+		Parts: a2a.ContentParts{a2a.NewDataPart(map[string]any{"key": "value"})},
+	}
+
+	result := FormatMessageResponse(msg)
+
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(result.Content))
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	expected := "response contained non-text content that cannot be displayed"
+	if textContent.Text != expected {
+		t.Errorf("expected %q, got %q", expected, textContent.Text)
+	}
+}
+
+func TestFormatMessageResponse_NoParts(t *testing.T) {
+	msg := &a2a.Message{
+		Role:  a2a.MessageRoleAgent,
+		Parts: a2a.ContentParts{},
+	}
+
+	result := FormatMessageResponse(msg)
+
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(result.Content))
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	if textContent.Text != "" {
+		t.Errorf("expected empty text, got %q", textContent.Text)
+	}
+}
+
+func TestFormatMessageResponse_MultipleTextParts(t *testing.T) {
+	msg := &a2a.Message{
+		Role: a2a.MessageRoleAgent,
+		Parts: a2a.ContentParts{
+			a2a.NewTextPart("Hello "),
+			a2a.NewTextPart("World"),
+		},
+	}
+
+	result := FormatMessageResponse(msg)
+
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(result.Content))
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	if textContent.Text != "Hello World" {
+		t.Errorf("expected %q, got %q", "Hello World", textContent.Text)
+	}
+}

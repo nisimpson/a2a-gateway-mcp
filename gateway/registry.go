@@ -3,6 +3,8 @@ package gateway
 import (
 	"sort"
 	"sync"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
 )
 
 // AgentEntry represents a registered agent in the registry.
@@ -10,6 +12,7 @@ type AgentEntry struct {
 	Alias   string
 	URL     string
 	Headers map[string]string
+	Card    *a2a.AgentCard // nil if fetch failed or not attempted
 }
 
 // AgentRegistry is a thread-safe, in-memory map of aliases to agent entries.
@@ -75,6 +78,20 @@ func (r *AgentRegistry) List() []*AgentEntry {
 		return entries[i].Alias < entries[j].Alias
 	})
 	return entries
+}
+
+// SetCard stores the AgentCard for the given alias. Returns false if the
+// alias is not found in the registry.
+func (r *AgentRegistry) SetCard(alias string, card *a2a.AgentCard) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry, ok := r.entries[alias]
+	if !ok {
+		return false
+	}
+	entry.Card = card
+	return true
 }
 
 // Len returns the number of registered agents.

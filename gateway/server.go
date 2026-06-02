@@ -52,6 +52,7 @@ type Server struct {
 	registry     *AgentRegistry
 	contextStore *ContextStore
 	httpClient   *http.Client
+	clients      *clientResolver
 }
 
 // NewServer creates a new gateway server with the given options.
@@ -77,6 +78,8 @@ func NewServer(opts ...Option) *Server {
 		contextStore: NewContextStore(),
 		httpClient:   cfg.httpClient,
 	}
+
+	s.clients = newClientResolver(s.registry, s.httpClient)
 
 	s.registerTools()
 

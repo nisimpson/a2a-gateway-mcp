@@ -90,8 +90,9 @@ func TestPropertyBroadcastPartialResultsAttribution(t *testing.T) {
 				return true // skip degenerate cases
 			}
 
-			// Set up httptest.Server for valid agents.
+			// Set up httptest.Server for valid agents returning JSON-RPC responses.
 			agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				req, _ := readJSONRPCRequest(r)
 				task := &a2a.Task{
 					ID:     "task-broadcast",
 					Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
@@ -99,15 +100,20 @@ func TestPropertyBroadcastPartialResultsAttribution(t *testing.T) {
 						{Parts: a2a.ContentParts{a2a.NewTextPart("broadcast response")}},
 					},
 				}
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(task)
+				writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 			}))
 			defer agent.Close()
 
-			// Create server and register valid aliases.
+			// Create server and register valid aliases with AgentCard.
 			srv := NewServer()
 			for _, alias := range validAliases {
 				srv.registry.Connect(alias, agent.URL, nil)
+				srv.registry.SetCard(alias, &a2a.AgentCard{
+					Name: alias,
+					SupportedInterfaces: []*a2a.AgentInterface{
+						a2a.NewAgentInterface(agent.URL, a2a.TransportProtocolJSONRPC),
+					},
+				})
 			}
 			// Invalid aliases are NOT registered.
 
@@ -178,6 +184,7 @@ func TestPropertyBroadcastPartialResultsAttribution(t *testing.T) {
 
 func TestHandleBroadcastMessage_AllSuccess(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID:     "task-1",
 			Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
@@ -185,15 +192,20 @@ func TestHandleBroadcastMessage_AllSuccess(t *testing.T) {
 				{Parts: a2a.ContentParts{a2a.NewTextPart("hello from agent")}},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("agent-a", agent.URL, nil)
-	srv.registry.Connect("agent-b", agent.URL, nil)
-	srv.registry.Connect("agent-c", agent.URL, nil)
+	for _, alias := range []string{"agent-a", "agent-b", "agent-c"} {
+		srv.registry.Connect(alias, agent.URL, nil)
+		srv.registry.SetCard(alias, &a2a.AgentCard{
+			Name: alias,
+			SupportedInterfaces: []*a2a.AgentInterface{
+				a2a.NewAgentInterface(agent.URL, a2a.TransportProtocolJSONRPC),
+			},
+		})
+	}
 
 	input := BroadcastMessageInput{
 		Aliases: []string{"agent-a", "agent-b", "agent-c"},
@@ -238,9 +250,9 @@ func TestHandleBroadcastMessage_AllSuccess(t *testing.T) {
 }
 
 func TestHandleBroadcastMessage_AllFailure(t *testing.T) {
-	// Use a server that immediately closes connections.
+	// Agent returns a failed task via JSON-RPC.
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Return a failed task.
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID: "task-fail",
 			Status: a2a.TaskStatus{
@@ -248,14 +260,20 @@ func TestHandleBroadcastMessage_AllFailure(t *testing.T) {
 				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("internal error")),
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("fail-a", agent.URL, nil)
-	srv.registry.Connect("fail-b", agent.URL, nil)
+	for _, alias := range []string{"fail-a", "fail-b"} {
+		srv.registry.Connect(alias, agent.URL, nil)
+		srv.registry.SetCard(alias, &a2a.AgentCard{
+			Name: alias,
+			SupportedInterfaces: []*a2a.AgentInterface{
+				a2a.NewAgentInterface(agent.URL, a2a.TransportProtocolJSONRPC),
+			},
+		})
+	}
 
 	input := BroadcastMessageInput{
 		Aliases: []string{"fail-a", "fail-b"},
@@ -298,6 +316,7 @@ func TestHandleBroadcastMessage_AllFailure(t *testing.T) {
 func TestHandleBroadcastMessage_MixedResults(t *testing.T) {
 	// Good agent returns completed task.
 	goodAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID:     "task-good",
 			Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
@@ -305,13 +324,13 @@ func TestHandleBroadcastMessage_MixedResults(t *testing.T) {
 				{Parts: a2a.ContentParts{a2a.NewTextPart("success response")}},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer goodAgent.Close()
 
 	// Bad agent returns failed task.
 	badAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID: "task-bad",
 			Status: a2a.TaskStatus{
@@ -319,14 +338,25 @@ func TestHandleBroadcastMessage_MixedResults(t *testing.T) {
 				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("agent error")),
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer badAgent.Close()
 
 	srv := NewServer()
 	srv.registry.Connect("good-agent", goodAgent.URL, nil)
+	srv.registry.SetCard("good-agent", &a2a.AgentCard{
+		Name: "good-agent",
+		SupportedInterfaces: []*a2a.AgentInterface{
+			a2a.NewAgentInterface(goodAgent.URL, a2a.TransportProtocolJSONRPC),
+		},
+	})
 	srv.registry.Connect("bad-agent", badAgent.URL, nil)
+	srv.registry.SetCard("bad-agent", &a2a.AgentCard{
+		Name: "bad-agent",
+		SupportedInterfaces: []*a2a.AgentInterface{
+			a2a.NewAgentInterface(badAgent.URL, a2a.TransportProtocolJSONRPC),
+		},
+	})
 
 	input := BroadcastMessageInput{
 		Aliases: []string{"good-agent", "bad-agent", "unregistered"},
@@ -379,6 +409,7 @@ func TestHandleBroadcastMessage_TimeoutEnforcement(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Sleep longer than the timeout.
 		time.Sleep(3 * time.Second)
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID:     "task-slow",
 			Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
@@ -386,13 +417,18 @@ func TestHandleBroadcastMessage_TimeoutEnforcement(t *testing.T) {
 				{Parts: a2a.ContentParts{a2a.NewTextPart("should not see this")}},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
 	srv := NewServer()
 	srv.registry.Connect("slow-agent", agent.URL, nil)
+	srv.registry.SetCard("slow-agent", &a2a.AgentCard{
+		Name: "slow-agent",
+		SupportedInterfaces: []*a2a.AgentInterface{
+			a2a.NewAgentInterface(agent.URL, a2a.TransportProtocolJSONRPC),
+		},
+	})
 
 	timeout := 1
 	input := BroadcastMessageInput{
@@ -518,6 +554,7 @@ func TestHandleBroadcastMessage_ConcurrentExecution(t *testing.T) {
 		requestCount.Add(1)
 		// Each agent takes 200ms to respond.
 		time.Sleep(200 * time.Millisecond)
+		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
 			ID:     "task-concurrent",
 			Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
@@ -525,18 +562,23 @@ func TestHandleBroadcastMessage_ConcurrentExecution(t *testing.T) {
 				{Parts: a2a.ContentParts{a2a.NewTextPart("concurrent response")}},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(task)
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
 	}))
 	defer agent.Close()
 
 	srv := NewServer()
 	numAgents := 5
 	aliases := make([]string, numAgents)
-	for i := 0; i < numAgents; i++ {
+	for i := range numAgents {
 		alias := "concurrent-" + string(rune('a'+i))
 		aliases[i] = alias
 		srv.registry.Connect(alias, agent.URL, nil)
+		srv.registry.SetCard(alias, &a2a.AgentCard{
+			Name: alias,
+			SupportedInterfaces: []*a2a.AgentInterface{
+				a2a.NewAgentInterface(agent.URL, a2a.TransportProtocolJSONRPC),
+			},
+		})
 	}
 
 	input := BroadcastMessageInput{
@@ -580,5 +622,267 @@ func TestHandleBroadcastMessage_ConcurrentExecution(t *testing.T) {
 
 	if len(results) != numAgents {
 		t.Errorf("expected %d results, got %d", numAgents, len(results))
+	}
+}
+
+func TestHandleBroadcastMessage_AuthRequired(t *testing.T) {
+	// Agent returns auth-required with a status message.
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		task := &a2a.Task{
+			ID:        "task-auth-broadcast",
+			ContextID: "ctx-auth-broadcast",
+			Status: a2a.TaskStatus{
+				State:   a2a.TaskStateAuthRequired,
+				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("OAuth2 authentication required")),
+			},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+	}))
+	defer agent.Close()
+
+	srv := NewServer()
+	srv.registry.Connect("auth-broadcast-agent", agent.URL, nil)
+	srv.registry.SetCard("auth-broadcast-agent", &a2a.AgentCard{
+		Name: "auth-broadcast-agent",
+		SupportedInterfaces: []*a2a.AgentInterface{
+			a2a.NewAgentInterface(agent.URL, a2a.TransportProtocolJSONRPC),
+		},
+	})
+
+	input := BroadcastMessageInput{
+		Aliases: []string{"auth-broadcast-agent"},
+		Message: "broadcast auth test",
+	}
+
+	result, _, err := srv.handleBroadcastMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected non-error result at top level")
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+
+	var results map[string]*broadcastResult
+	if err := json.Unmarshal([]byte(textContent.Text), &results); err != nil {
+		t.Fatalf("failed to parse results: %v", err)
+	}
+
+	r, exists := results["auth-broadcast-agent"]
+	if !exists {
+		t.Fatal("missing result for auth-broadcast-agent")
+	}
+	if r.Status != "auth-required" {
+		t.Errorf("expected status %q, got %q", "auth-required", r.Status)
+	}
+	if r.Response != "OAuth2 authentication required" {
+		t.Errorf("expected response %q, got %q", "OAuth2 authentication required", r.Response)
+	}
+}
+
+func TestHandleBroadcastMessage_MessageResponse(t *testing.T) {
+	// Agent that returns a Message response (not a Task).
+	messageAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		msg := &a2a.Message{
+			Role:  a2a.MessageRoleAgent,
+			Parts: a2a.ContentParts{a2a.NewTextPart("hello from message agent")},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcMessageResult(msg))
+	}))
+	defer messageAgent.Close()
+
+	// Agent that returns a Task response (normal behavior).
+	taskAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		task := &a2a.Task{
+			ID:     "task-1",
+			Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+			Artifacts: []*a2a.Artifact{
+				{Parts: a2a.ContentParts{a2a.NewTextPart("hello from task agent")}},
+			},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+	}))
+	defer taskAgent.Close()
+
+	srv := NewServer()
+	srv.registry.Connect("msg-agent", messageAgent.URL, nil)
+	srv.registry.SetCard("msg-agent", &a2a.AgentCard{
+		Name: "msg-agent",
+		SupportedInterfaces: []*a2a.AgentInterface{
+			a2a.NewAgentInterface(messageAgent.URL, a2a.TransportProtocolJSONRPC),
+		},
+	})
+	srv.registry.Connect("task-agent", taskAgent.URL, nil)
+	srv.registry.SetCard("task-agent", &a2a.AgentCard{
+		Name: "task-agent",
+		SupportedInterfaces: []*a2a.AgentInterface{
+			a2a.NewAgentInterface(taskAgent.URL, a2a.TransportProtocolJSONRPC),
+		},
+	})
+
+	input := BroadcastMessageInput{
+		Aliases: []string{"msg-agent", "task-agent"},
+		Message: "broadcast with message response",
+	}
+
+	result, _, err := srv.handleBroadcastMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+
+	var results map[string]*broadcastResult
+	if err := json.Unmarshal([]byte(textContent.Text), &results); err != nil {
+		t.Fatalf("failed to parse results: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	// Message agent should succeed with the message text.
+	msgResult, exists := results["msg-agent"]
+	if !exists {
+		t.Fatal("missing result for msg-agent")
+	}
+	if msgResult.Status != "success" {
+		t.Errorf("expected success for msg-agent, got %s", msgResult.Status)
+	}
+	if msgResult.Response != "hello from message agent" {
+		t.Errorf("expected response %q for msg-agent, got %q", "hello from message agent", msgResult.Response)
+	}
+
+	// Task agent should also succeed with the task text.
+	taskResult, exists := results["task-agent"]
+	if !exists {
+		t.Fatal("missing result for task-agent")
+	}
+	if taskResult.Status != "success" {
+		t.Errorf("expected success for task-agent, got %s", taskResult.Status)
+	}
+	if taskResult.Response != "hello from task agent" {
+		t.Errorf("expected response %q for task-agent, got %q", "hello from task agent", taskResult.Response)
+	}
+}
+
+func TestHandleBroadcastMessage_MessageResponseNonTextParts(t *testing.T) {
+	// Agent that returns a Message response with non-text parts.
+	nonTextAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		msg := &a2a.Message{
+			Role:  a2a.MessageRoleAgent,
+			Parts: a2a.ContentParts{a2a.NewDataPart(map[string]any{"key": "value"})},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcMessageResult(msg))
+	}))
+	defer nonTextAgent.Close()
+
+	srv := NewServer()
+	srv.registry.Connect("nontext-agent", nonTextAgent.URL, nil)
+	srv.registry.SetCard("nontext-agent", &a2a.AgentCard{
+		Name: "nontext-agent",
+		SupportedInterfaces: []*a2a.AgentInterface{
+			a2a.NewAgentInterface(nonTextAgent.URL, a2a.TransportProtocolJSONRPC),
+		},
+	})
+
+	input := BroadcastMessageInput{
+		Aliases: []string{"nontext-agent"},
+		Message: "broadcast with non-text message",
+	}
+
+	result, _, err := srv.handleBroadcastMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+
+	var results map[string]*broadcastResult
+	if err := json.Unmarshal([]byte(textContent.Text), &results); err != nil {
+		t.Fatalf("failed to parse results: %v", err)
+	}
+
+	r, exists := results["nontext-agent"]
+	if !exists {
+		t.Fatal("missing result for nontext-agent")
+	}
+	if r.Status != "success" {
+		t.Errorf("expected success for nontext-agent, got %s", r.Status)
+	}
+	if r.Response != "response contained non-text content that cannot be displayed" {
+		t.Errorf("expected non-text content message, got %q", r.Response)
+	}
+}
+
+func TestHandleBroadcastMessage_UnrecognizedResponse(t *testing.T) {
+	// Agent that returns a JSON-RPC error (SDK will surface it as an error).
+	weirdAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		writeJSONRPCError(w, req.ID, -32603, "internal error")
+	}))
+	defer weirdAgent.Close()
+
+	srv := NewServer()
+	srv.registry.Connect("weird-agent", weirdAgent.URL, nil)
+	srv.registry.SetCard("weird-agent", &a2a.AgentCard{
+		Name: "weird-agent",
+		SupportedInterfaces: []*a2a.AgentInterface{
+			a2a.NewAgentInterface(weirdAgent.URL, a2a.TransportProtocolJSONRPC),
+		},
+	})
+
+	input := BroadcastMessageInput{
+		Aliases: []string{"weird-agent"},
+		Message: "broadcast with unrecognized response",
+	}
+
+	result, _, err := srv.handleBroadcastMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected non-error result at top level")
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+
+	var results map[string]*broadcastResult
+	if err := json.Unmarshal([]byte(textContent.Text), &results); err != nil {
+		t.Fatalf("failed to parse results: %v", err)
+	}
+
+	r, exists := results["weird-agent"]
+	if !exists {
+		t.Fatal("missing result for weird-agent")
+	}
+	if r.Status != "error" {
+		t.Errorf("expected error for weird-agent, got %s", r.Status)
+	}
+	if r.Error == "" {
+		t.Error("expected non-empty error message for weird-agent")
 	}
 }
