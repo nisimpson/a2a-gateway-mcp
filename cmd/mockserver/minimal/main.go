@@ -1,3 +1,5 @@
+//go:build dev
+
 // Package main provides a mock A2A server for testing the a2a-gateway-mcp client.
 // It implements the minimum A2A protocol surface: agent card discovery, message
 // handling (echo), task retrieval, and an agent directory endpoint.

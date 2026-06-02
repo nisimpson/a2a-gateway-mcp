@@ -128,6 +128,15 @@ func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 		}
 		return FormatTaskResponse(&task), nil, nil
 
+	case a2a.TaskStateInputRequired:
+		// input-required is a terminal state for the current turn — the agent
+		// needs additional input from the caller before it can proceed. Return
+		// immediately so the caller can provide follow-up input via context_id.
+		if resolved.IsAlias && task.ContextID != "" {
+			s.contextStore.Set(input.Agent, task.ContextID)
+		}
+		return FormatInputRequiredResponse(&task), nil, nil
+
 	case a2a.TaskStateFailed:
 		// Update context store even on failure if context_id is present.
 		if resolved.IsAlias && task.ContextID != "" {
@@ -156,7 +165,19 @@ func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 		}, nil, nil
 
 	default:
-		// Poll up to 60s for non-terminal states.
+		// Guard: if the task has no ID, the agent likely doesn't support tasks/get.
+		// Treat the current response as final rather than attempting to poll.
+		if task.ID == "" {
+			if resolved.IsAlias && task.ContextID != "" {
+				s.contextStore.Set(input.Agent, task.ContextID)
+			}
+			return &mcp.CallToolResult{
+				IsError: true,
+				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("agent returned non-terminal state %q without a task ID; cannot poll for completion", task.Status.State)}},
+			}, nil, nil
+		}
+
+		// Poll up to 60s for non-terminal states (e.g. working, submitted).
 		task, err := s.pollTaskCompletion(ctx, client, resolved.URL, task.ID)
 		if err != nil {
 			return &mcp.CallToolResult{
@@ -171,6 +192,8 @@ func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 		switch task.Status.State {
 		case a2a.TaskStateCompleted:
 			return FormatTaskResponse(task), nil, nil
+		case a2a.TaskStateInputRequired:
+			return FormatInputRequiredResponse(task), nil, nil
 		case a2a.TaskStateFailed:
 			failMsg := "task failed"
 			if task.Status.Message != nil {
@@ -219,7 +242,7 @@ func (s *Server) pollTaskCompletion(ctx context.Context, client *http.Client, ag
 			}
 
 			switch task.Status.State {
-			case a2a.TaskStateCompleted, a2a.TaskStateFailed, a2a.TaskStateCanceled:
+			case a2a.TaskStateCompleted, a2a.TaskStateFailed, a2a.TaskStateCanceled, a2a.TaskStateInputRequired:
 				return task, nil
 			}
 			// Still non-terminal, continue polling.
@@ -247,6 +270,11 @@ func (s *Server) getTaskStatus(ctx context.Context, client *http.Client, agentUR
 		return nil, fmt.Errorf("agent unreachable: %v", err)
 	}
 	defer resp.Body.Close()
+
+	// If the agent returns a non-2xx status, it likely doesn't support tasks/get.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("agent does not support tasks/get (HTTP %d)", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

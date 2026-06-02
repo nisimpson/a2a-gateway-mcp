@@ -7,6 +7,52 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// FormatInputRequiredResponse formats a response for a task in the
+// input-required state. It includes:
+//   - The agent's status message (explaining what input is needed), or
+//     artifact text if available.
+//   - A "state:input-required" indicator so callers can programmatically
+//     distinguish this from a completed response.
+//   - The context_id for follow-up messages.
+func FormatInputRequiredResponse(task *a2a.Task) *mcp.CallToolResult {
+	result := &mcp.CallToolResult{}
+
+	// Prefer status message text (agents typically explain what they need here).
+	var responseText string
+	if task.Status.Message != nil {
+		responseText = extractStatusMessageText(task.Status.Message)
+	}
+
+	// Fall back to artifact text if no status message.
+	if responseText == "" {
+		text, hasTextParts := extractTextFromArtifacts(task.Artifacts)
+		hasAnyParts := artifactsHaveAnyParts(task.Artifacts)
+		switch {
+		case hasTextParts:
+			responseText = text
+		case hasAnyParts:
+			responseText = "response contained non-text content that cannot be displayed"
+		}
+	}
+
+	if responseText != "" {
+		result.Content = append(result.Content, &mcp.TextContent{Text: responseText})
+	}
+
+	// Include task state so callers can programmatically detect input-required.
+	result.Content = append(result.Content, &mcp.TextContent{
+		Text: "state:input-required",
+	})
+
+	if task.ContextID != "" {
+		result.Content = append(result.Content, &mcp.TextContent{
+			Text: "context_id:" + task.ContextID,
+		})
+	}
+
+	return result
+}
+
 // FormatTaskResponse extracts text content from an A2A Task and formats it
 // as MCP CallToolResult content items.
 //
