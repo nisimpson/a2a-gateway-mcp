@@ -6,7 +6,8 @@ import "fmt"
 type ResolveResult struct {
 	URL     string
 	Headers map[string]string
-	IsAlias bool // true if resolved from registry, false if raw URL
+	IsAlias bool   // true if resolved from registry, false if raw URL
+	Alias   string // populated when IsAlias is true
 }
 
 // ResolveAgent determines whether the identifier is a registered alias or
@@ -18,6 +19,7 @@ func ResolveAgent(registry *AgentRegistry, identifier string) (*ResolveResult, e
 			URL:     entry.URL,
 			Headers: entry.Headers,
 			IsAlias: true,
+			Alias:   identifier,
 		}, nil
 	}
 

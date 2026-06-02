@@ -16,7 +16,7 @@ const (
 )
 
 // handleSendMessage sends a text message to a connected A2A agent by alias or URL.
-func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, input SendMessageInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest, input SendMessageInput) (*mcp.CallToolResult, any, error) {
 	// Validate agent identifier is provided.
 	if input.Agent == "" {
 		return &mcp.CallToolResult{
@@ -66,6 +66,15 @@ func (s *Server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 	a2aClient, err := s.clients.Resolve(ctx, resolved)
 	if err != nil {
 		return handleA2AError(err), nil, nil
+	}
+
+	// Requirement: STRM-1.1, STRM-1.5 — route to streaming when supported.
+	if supportsStreaming(s.registry, resolved) {
+		result, err := s.handleStreamingMessage(ctx, req, a2aClient, sendReq, resolved, input.Agent)
+		if err != nil {
+			return handleA2AError(err), nil, nil
+		}
+		return result, nil, nil
 	}
 
 	// Call SDK client.
