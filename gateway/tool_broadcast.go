@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -105,13 +106,21 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, ti
 	defer cancel()
 
 	// Resolve SDK client for this agent.
-	resolved := &ResolveResult{URL: entry.URL, IsAlias: true, Headers: entry.Headers}
+	resolved := &ResolveResult{URL: entry.URL, IsAlias: true, Headers: entry.Headers, Alias: alias}
 	a2aClient, err := s.clients.Resolve(agentCtx, resolved)
 	if err != nil {
 		return &broadcastResult{
 			Status: "error",
 			Error:  fmt.Sprintf("failed to resolve client: %v", err),
 		}
+	}
+
+	// Requirement: STRM-5.1, STRM-5.2 — use streaming when supported.
+	if supportsStreaming(s.registry, resolved) {
+		sendReq := &a2a.SendMessageRequest{
+			Message: a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(message)),
+		}
+		return s.broadcastToAgentStreaming(agentCtx, a2aClient, sendReq, resolved, alias, timeoutSeconds)
 	}
 
 	// Build and send A2A message.
@@ -157,6 +166,52 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, ti
 			Status: "error",
 			Error:  "unrecognized response format",
 		}
+	}
+}
+
+// broadcastToAgentStreaming sends a message using streaming and converts
+// the result to a broadcastResult with the same shape as non-streaming.
+// Requirements: STRM-5.1, STRM-5.3, STRM-5.4
+func (s *Server) broadcastToAgentStreaming(
+	ctx context.Context,
+	a2aClient *a2aclient.Client,
+	sendReq *a2a.SendMessageRequest,
+	resolved *ResolveResult,
+	alias string,
+	timeoutSeconds int,
+) *broadcastResult {
+	// Requirement: STRM-5.3 — per-agent broadcast timeout is already applied
+	// via the parent ctx (agentCtx) from broadcastToAgent. No additional
+	// timeout needed here.
+	events := a2aClient.SendStreamingMessage(ctx, sendReq)
+
+	state := &streamState{}
+	result, err := consumeStream(ctx, events, state)
+	if err != nil {
+		return &broadcastResult{Status: "error", Error: err.Error()}
+	}
+
+	// Convert streamResult to broadcastResult using the same logic as non-streaming path.
+	switch {
+	case result.task != nil:
+		return s.handleBroadcastTaskResult(result.task)
+
+	case result.message != nil:
+		text, hasTextParts := extractTextFromMessageParts(result.message.Parts)
+		if hasTextParts {
+			return &broadcastResult{Status: "success", Response: text}
+		}
+		if len(result.message.Parts) > 0 {
+			return &broadcastResult{Status: "success", Response: "response contained non-text content that cannot be displayed"}
+		}
+		return &broadcastResult{Status: "success", Response: ""}
+
+	case result.terminatedByStatus:
+		task := buildTaskFromState(result.state)
+		return s.handleBroadcastTaskResult(task)
+
+	default:
+		return &broadcastResult{Status: "error", Error: "no terminal event received"}
 	}
 }
 
