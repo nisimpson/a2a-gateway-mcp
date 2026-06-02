@@ -17,7 +17,7 @@ help:
 # ==================================================================================== #
 
 ## build: build all binaries
-.PHONY: all build gateway mockserver
+.PHONY: all build gateway mockserver mockserver-minimal mockserver-knock-knock
 all: build
 
 build: gateway mockserver
@@ -25,8 +25,13 @@ build: gateway mockserver
 gateway:
 	go build -o bin/a2a-gateway-mcp ./cmd/a2a-gateway-mcp
 
-mockserver:
-	go build -o bin/mockserver ./cmd/mockserver
+mockserver: mockserver-minimal mockserver-knock-knock
+
+mockserver-minimal:
+	go build -tags dev -o bin/mockserver-minimal ./cmd/mockserver/minimal
+
+mockserver-knock-knock:
+	go build -tags dev -o bin/mockserver-knock-knock ./cmd/mockserver/knock-knock
 
 ## clean: remove build artifacts
 .PHONY: clean
