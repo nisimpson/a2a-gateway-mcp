@@ -171,6 +171,20 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, ti
 			Status:   "success",
 			Response: text,
 		}
+	case a2a.TaskStateInputRequired:
+		// input-required is terminal for the current turn; surface the agent's message.
+		responseText := ""
+		if task.Status.Message != nil {
+			responseText = extractStatusMessageText(task.Status.Message)
+		}
+		if responseText == "" {
+			text, _ := extractTextFromArtifacts(task.Artifacts)
+			responseText = text
+		}
+		return &broadcastResult{
+			Status:   "input-required",
+			Response: responseText,
+		}
 	case a2a.TaskStateFailed:
 		failMsg := "task failed"
 		if task.Status.Message != nil {

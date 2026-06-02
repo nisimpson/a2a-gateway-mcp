@@ -675,3 +675,330 @@ func TestHandleSendMessage_NonTerminalState_Timeout(t *testing.T) {
 		t.Error("expected non-empty timeout error message")
 	}
 }
+
+func TestHandleSendMessage_InputRequired_ReturnsImmediately(t *testing.T) {
+	// Agent returns input-required with a status message explaining what's needed.
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		task := &a2a.Task{
+			ID:        "task-input-1",
+			ContextID: "ctx-input-1",
+			Status: a2a.TaskStatus{
+				State:   a2a.TaskStateInputRequired,
+				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("Please confirm: proceed with deletion?")),
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(task)
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("input-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "input-agent",
+		Message: "delete all files",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success for input-required state, got error: %v", result.Content)
+	}
+
+	// Should contain: status message text, state indicator, context_id.
+	if len(result.Content) < 3 {
+		t.Fatalf("expected at least 3 content items, got %d", len(result.Content))
+	}
+
+	// First: the agent's status message.
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected first content to be TextContent")
+	}
+	if textContent.Text != "Please confirm: proceed with deletion?" {
+		t.Errorf("expected agent message %q, got %q", "Please confirm: proceed with deletion?", textContent.Text)
+	}
+
+	// Second: state indicator.
+	stateContent, ok := result.Content[1].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected second content to be TextContent")
+	}
+	if stateContent.Text != "state:input-required" {
+		t.Errorf("expected state indicator %q, got %q", "state:input-required", stateContent.Text)
+	}
+
+	// Third: context_id.
+	ctxContent, ok := result.Content[2].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected third content to be TextContent")
+	}
+	if ctxContent.Text != "context_id:ctx-input-1" {
+		t.Errorf("expected context_id %q, got %q", "context_id:ctx-input-1", ctxContent.Text)
+	}
+
+	// Verify context store was updated.
+	if stored := srv.contextStore.Get("input-agent"); stored != "ctx-input-1" {
+		t.Errorf("expected context store to have %q, got %q", "ctx-input-1", stored)
+	}
+}
+
+func TestHandleSendMessage_InputRequired_NoStatusMessage_UsesArtifacts(t *testing.T) {
+	// Agent returns input-required with no status message but with artifacts.
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		task := &a2a.Task{
+			ID:        "task-input-2",
+			ContextID: "ctx-input-2",
+			Status: a2a.TaskStatus{
+				State: a2a.TaskStateInputRequired,
+			},
+			Artifacts: []*a2a.Artifact{
+				{Parts: a2a.ContentParts{a2a.NewTextPart("What is your name?")}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(task)
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("input-agent-2", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "input-agent-2",
+		Message: "start onboarding",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("expected success for input-required state")
+	}
+
+	// First content should be artifact text.
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected first content to be TextContent")
+	}
+	if textContent.Text != "What is your name?" {
+		t.Errorf("expected %q, got %q", "What is your name?", textContent.Text)
+	}
+}
+
+func TestHandleSendMessage_InputRequired_DoesNotPoll(t *testing.T) {
+	// Verify that input-required does NOT trigger polling (only 1 HTTP call).
+	var callCount int
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		task := &a2a.Task{
+			ID:        "task-input-3",
+			ContextID: "ctx-input-3",
+			Status: a2a.TaskStatus{
+				State:   a2a.TaskStateInputRequired,
+				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("need more info")),
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(task)
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("no-poll-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "no-poll-agent",
+		Message: "do something",
+	}
+
+	_, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should only have made exactly 1 HTTP call (no polling).
+	if callCount != 1 {
+		t.Errorf("expected exactly 1 HTTP call (no polling), got %d", callCount)
+	}
+}
+
+func TestHandleSendMessage_InputRequired_ResumableViaContextID(t *testing.T) {
+	// Simulate a multi-turn interaction:
+	// 1. First send_message -> agent returns input-required
+	// 2. Second send_message with context_id -> agent returns completed
+	var callCount int
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		var req a2a.SendMessageRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		var task *a2a.Task
+		if req.Message.ContextID == "" {
+			// First call: return input-required
+			task = &a2a.Task{
+				ID:        "task-multi-1",
+				ContextID: "ctx-multi-1",
+				Status: a2a.TaskStatus{
+					State:   a2a.TaskStateInputRequired,
+					Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("confirm?")),
+				},
+			}
+		} else {
+			// Follow-up with context_id: return completed
+			task = &a2a.Task{
+				ID:        "task-multi-1",
+				ContextID: "ctx-multi-1",
+				Status:    a2a.TaskStatus{State: a2a.TaskStateCompleted},
+				Artifacts: []*a2a.Artifact{
+					{Parts: a2a.ContentParts{a2a.NewTextPart("done!")}},
+				},
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(task)
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("multi-turn-agent", agent.URL)
+
+	// First message: should get input-required.
+	input1 := SendMessageInput{
+		Agent:   "multi-turn-agent",
+		Message: "do something dangerous",
+	}
+	result1, _, err := srv.handleSendMessage(context.Background(), nil, input1)
+	if err != nil {
+		t.Fatalf("unexpected error on first send: %v", err)
+	}
+	if result1.IsError {
+		t.Fatal("expected success for first send")
+	}
+
+	// Context store should now have the context_id.
+	storedCtx := srv.contextStore.Get("multi-turn-agent")
+	if storedCtx != "ctx-multi-1" {
+		t.Fatalf("expected stored context %q, got %q", "ctx-multi-1", storedCtx)
+	}
+
+	// Second message: uses stored context_id automatically, agent completes.
+	input2 := SendMessageInput{
+		Agent:   "multi-turn-agent",
+		Message: "yes, confirmed",
+	}
+	result2, _, err := srv.handleSendMessage(context.Background(), nil, input2)
+	if err != nil {
+		t.Fatalf("unexpected error on second send: %v", err)
+	}
+	if result2.IsError {
+		t.Fatal("expected success for second send")
+	}
+
+	textContent, ok := result2.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	if textContent.Text != "done!" {
+		t.Errorf("expected %q, got %q", "done!", textContent.Text)
+	}
+
+	// Both calls should have been made without polling.
+	if callCount != 2 {
+		t.Errorf("expected exactly 2 HTTP calls, got %d", callCount)
+	}
+}
+
+func TestHandleSendMessage_NonTerminalState_NoTaskID_DoesNotPoll(t *testing.T) {
+	// Agent returns a "working" state with no task ID. The gateway should NOT
+	// attempt to poll because tasks/get requires a task ID.
+	var callCount int
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		task := &a2a.Task{
+			// No ID — agent doesn't support tasks/get
+			Status: a2a.TaskStatus{State: a2a.TaskStateWorking},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(task)
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("no-taskid-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "no-taskid-agent",
+		Message: "hello",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result when agent returns non-terminal with no task ID")
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	if textContent.Text == "" {
+		t.Error("expected non-empty error message")
+	}
+
+	// Should only have made 1 HTTP call (no polling attempted).
+	if callCount != 1 {
+		t.Errorf("expected exactly 1 HTTP call (no poll), got %d", callCount)
+	}
+}
+
+func TestHandleSendMessage_PollFailsOnNon2xx(t *testing.T) {
+	// Agent returns "working" on first call (with a task ID), but then returns
+	// 404 on the tasks/get poll — indicating it doesn't support that endpoint.
+	var callCount int
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			task := &a2a.Task{
+				ID:     "task-no-get",
+				Status: a2a.TaskStatus{State: a2a.TaskStateWorking},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(task)
+		} else {
+			// Agent doesn't support tasks/get
+			http.NotFound(w, r)
+		}
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("no-get-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "no-get-agent",
+		Message: "hello",
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error when poll receives non-2xx")
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	// Should mention that the agent doesn't support tasks/get.
+	if textContent.Text == "" {
+		t.Error("expected non-empty error message about polling failure")
+	}
+
+	// Should have made exactly 2 calls: initial + one failed poll attempt.
+	if callCount != 2 {
+		t.Errorf("expected exactly 2 HTTP calls, got %d", callCount)
+	}
+}
