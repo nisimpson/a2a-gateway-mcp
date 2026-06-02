@@ -791,7 +791,6 @@ func searchSubstring(s, substr string) bool {
 	return false
 }
 
-
 // Feature: streaming-transport, Property 11: Broadcast Output Equivalence
 // **Validates: Requirements STRM-5.4, STRM-6.2, STRM-6.3**
 
