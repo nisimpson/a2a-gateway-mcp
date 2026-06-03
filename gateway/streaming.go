@@ -229,7 +229,7 @@ func (s *Server) formatStreamTask(task *a2a.Task) *mcp.CallToolResult {
 	default:
 		return &mcp.CallToolResult{
 			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("unexpected task state: %s", task.Status.State)}},
+			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("agent returned unrecognized task state %q — ensure the agent supports A2A protocol v1.0 or later", task.Status.State)}},
 		}
 	}
 }

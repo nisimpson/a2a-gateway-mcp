@@ -38,10 +38,13 @@ func (s *Server) handleConnectAgent(ctx context.Context, _ *mcp.CallToolRequest,
 		}, nil, nil
 	}
 
-	// Check if alias already exists with a different URL; if so, clear context.
+	// Check if alias already exists; if so, evict cached client and clear context if URL changed.
 	existing := s.registry.Lookup(input.Alias)
-	if existing != nil && existing.URL != input.AgentURL {
-		s.contextStore.Delete(input.Alias)
+	if existing != nil {
+		s.clients.Evict(existing.URL)
+		if existing.URL != input.AgentURL {
+			s.contextStore.Delete(input.Alias)
+		}
 	}
 
 	// Add or update the registry entry.
