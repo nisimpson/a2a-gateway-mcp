@@ -148,8 +148,8 @@ func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Clie
 			Content: []mcp.Content{&mcp.TextContent{Text: "task was canceled by the agent"}},
 		}, nil, nil
 
-	default:
-		// Guard: if the task has no ID, the agent likely doesn't support tasks/get.
+	case a2a.TaskStateWorking, a2a.TaskStateSubmitted:
+		// Known non-terminal states — poll for completion if task has an ID.
 		if task.ID == "" {
 			if resolved.IsAlias && task.ContextID != "" {
 				s.contextStore.Set(agent, task.ContextID)
@@ -160,7 +160,7 @@ func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Clie
 			}, nil, nil
 		}
 
-		// Poll up to 60s for non-terminal states (e.g. working, submitted).
+		// Poll up to 60s for non-terminal states.
 		polledTask, err := s.pollTaskCompletion(ctx, a2aClient, task.ID)
 		if err != nil {
 			return &mcp.CallToolResult{
@@ -203,6 +203,16 @@ func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Clie
 				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("timeout waiting for task completion (state: %s)", polledTask.Status.State)}},
 			}, nil, nil
 		}
+
+	default:
+		// Unrecognized task state — likely a v0.x agent or protocol mismatch.
+		if resolved.IsAlias && task.ContextID != "" {
+			s.contextStore.Set(agent, task.ContextID)
+		}
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("agent returned unrecognized task state %q — ensure the agent supports A2A protocol v1.0 or later", task.Status.State)}},
+		}, nil, nil
 	}
 }
 

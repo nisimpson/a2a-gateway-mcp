@@ -61,9 +61,9 @@ audit:
 no-dirty:
 	git diff --exit-code
 
-## lint: run tidy, audit, and verify no uncommitted changes
+## lint: run audit, tidy, and verify no uncommitted changes
 .PHONY: lint
-lint: tidy audit no-dirty
+lint: audit tidy no-dirty
 
 # ==================================================================================== #
 # TESTING

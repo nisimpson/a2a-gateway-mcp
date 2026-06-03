@@ -1,6 +1,6 @@
 module github.com/nisimpson/a2a-gateway-mcp
 
-go 1.25.10
+go 1.25.11
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.3.1

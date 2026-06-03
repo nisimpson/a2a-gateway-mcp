@@ -70,15 +70,31 @@ func (r *clientResolver) Resolve(ctx context.Context, resolved *ResolveResult) (
 	return client, nil
 }
 
+// Evict removes the cached client for the given URL, forcing re-creation
+// on the next Resolve call.
+func (r *clientResolver) Evict(url string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.clients, url)
+}
+
 // createClient creates an a2aclient.Client using the agent's card or
 // falling back to a JSON-RPC endpoint at the agent's URL.
 func (r *clientResolver) createClient(ctx context.Context, resolved *ResolveResult, card *a2a.AgentCard, httpClient *http.Client) (*a2aclient.Client, error) {
 	if card != nil && len(card.SupportedInterfaces) > 0 {
-		// Use the card — the SDK auto-selects transport (prefers JSON-RPC).
-		client, err := a2aclient.NewFromCard(ctx, card,
-			a2aclient.WithJSONRPCTransport(httpClient),
-			a2aclient.WithRESTTransport(httpClient),
-		)
+		// Determine transport option based on the card's primary interface protocol.
+		var opts []a2aclient.FactoryOption
+		switch card.SupportedInterfaces[0].ProtocolBinding {
+		case a2a.TransportProtocolJSONRPC:
+			opts = append(opts, a2aclient.WithJSONRPCTransport(httpClient))
+		case a2a.TransportProtocolHTTPJSON:
+			opts = append(opts, a2aclient.WithRESTTransport(httpClient))
+		default:
+			// Unknown protocol binding — fall through to JSON-RPC default.
+			opts = append(opts, a2aclient.WithJSONRPCTransport(httpClient))
+		}
+
+		client, err := a2aclient.NewFromCard(ctx, card, opts...)
 		if err == nil {
 			return client, nil
 		}
