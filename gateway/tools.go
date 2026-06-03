@@ -24,19 +24,36 @@ type GetAgentCardInput struct {
 	Agent string `json:"agent" jsonschema:"agent alias from registry or full HTTP/HTTPS URL"`
 }
 
+// InputPart represents a single content part in a multi-part message.
+// Exactly one of Text, Data, URL, or Raw should be set.
+type InputPart struct {
+	// Text contains plain text content.
+	Text *string `json:"text,omitempty" jsonschema:"plain text content"`
+	// Data contains structured JSON data to send as a DataPart.
+	Data any `json:"data,omitempty" jsonschema:"structured JSON data (object, array, or primitive)"`
+	// URL contains a URL reference to send as a URLPart.
+	URL *string `json:"url,omitempty" jsonschema:"URL reference"`
+	// Raw contains base64-encoded binary data to send as a RawPart.
+	Raw *string `json:"raw,omitempty" jsonschema:"base64-encoded binary data (standard base64, RFC 4648). Decode with base64.StdEncoding."`
+}
+
 // SendMessageInput is the input schema for the send_message tool.
 type SendMessageInput struct {
-	Agent     string `json:"agent" jsonschema:"agent alias from registry or full HTTP/HTTPS URL"`
-	Message   string `json:"message" jsonschema:"text message to send to the agent (max 32768 chars)"`
-	ContextID string `json:"context_id,omitempty" jsonschema:"optional context ID to continue an existing conversation"`
-	TaskID    string `json:"task_id,omitempty" jsonschema:"optional task ID to reference an existing task for follow-up messages"`
+	Agent     string         `json:"agent" jsonschema:"agent alias from registry or full HTTP/HTTPS URL"`
+	Message   string         `json:"message,omitempty" jsonschema:"plain text message to send. Use this for simple text-only messages. Mutually exclusive with 'parts' — if both are provided, 'parts' takes precedence."`
+	Parts     []InputPart    `json:"parts,omitempty" jsonschema:"structured message parts for multi-part or non-text content. Use this when sending JSON data, URLs, or mixed content. Takes precedence over 'message' if both are provided."`
+	ContextID string         `json:"context_id,omitempty" jsonschema:"optional context ID to continue an existing conversation"`
+	TaskID    string         `json:"task_id,omitempty" jsonschema:"optional task ID to reference an existing task for follow-up messages"`
+	Metadata  map[string]any `json:"metadata,omitempty" jsonschema:"optional metadata for A2A protocol extensions (e.g. caller capabilities)"`
 }
 
 // BroadcastMessageInput is the input schema for the broadcast_message tool.
 type BroadcastMessageInput struct {
-	Aliases        []string `json:"aliases" jsonschema:"list of agent aliases to send the message to (min 1, max 20)"`
-	Message        string   `json:"message" jsonschema:"text message to broadcast to all specified agents (max 32768 chars)"`
-	TimeoutSeconds *int     `json:"timeout_seconds,omitempty" jsonschema:"per-agent timeout in seconds (min 1, max 120, default 30)"`
+	Aliases        []string       `json:"aliases" jsonschema:"list of agent aliases to send the message to (min 1, max 20)"`
+	Message        string         `json:"message,omitempty" jsonschema:"plain text message to broadcast. Mutually exclusive with 'parts'."`
+	Parts          []InputPart    `json:"parts,omitempty" jsonschema:"structured message parts. Takes precedence over 'message' if both provided."`
+	TimeoutSeconds *int           `json:"timeout_seconds,omitempty" jsonschema:"per-agent timeout in seconds (min 1, max 120, default 30)"`
+	Metadata       map[string]any `json:"metadata,omitempty" jsonschema:"optional metadata for A2A protocol extensions"`
 }
 
 // GetTaskInput is the input schema for the get_task tool.
@@ -82,8 +99,10 @@ func (s *Server) registerTools() {
 	}, s.handleGetAgentCard)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "send_message",
-		Description: "Send a text message to a connected A2A agent by alias or URL",
+		Name: "send_message",
+		Description: `Send a message to a connected A2A agent by alias or URL.
+
+Use 'message' for simple plain-text messages. Use 'parts' when you need to send structured data (JSON objects), URLs, or multi-part content. Parts also support base64-encoded binary data via the 'raw' field. If both are provided, 'parts' takes precedence.`,
 	}, s.handleSendMessage)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
@@ -97,8 +116,10 @@ func (s *Server) registerTools() {
 	}, s.handleCancelTask)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "broadcast_message",
-		Description: "Send the same message to multiple agents simultaneously and collect responses",
+		Name: "broadcast_message",
+		Description: `Send the same message to multiple agents simultaneously and collect responses.
+
+Use 'message' for simple plain-text broadcasts. Use 'parts' when you need to send structured data or mixed content to all agents. Parts also support base64-encoded binary data via the 'raw' field.`,
 	}, s.handleBroadcastMessage)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{

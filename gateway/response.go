@@ -1,18 +1,45 @@
 package gateway
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// renderPart converts an a2a.Part to its string representation.
+// Returns the rendered string and true if the part was successfully rendered,
+// or empty string and false if the part is nil or has an unrecognized content type.
+func renderPart(part *a2a.Part) (string, bool) {
+	if part == nil {
+		return "", false
+	}
+	switch v := part.Content.(type) {
+	case a2a.Text:
+		return string(v), true
+	case a2a.Data:
+		data, err := json.Marshal(v.Value)
+		if err != nil {
+			return fmt.Sprintf("[unserializable data: %v]", err), true
+		}
+		return string(data), true
+	case a2a.URL:
+		return string(v), true
+	case a2a.Raw:
+		return base64.StdEncoding.EncodeToString([]byte(v)), true
+	default:
+		return "", false
+	}
+}
+
 // FormatMessageResponse formats an a2a.Message response as MCP content items.
 //
 // Behavior:
-//   - Extracts text from all TextParts in the message, concatenated in order.
-//   - If the message contains only non-text parts, returns a message indicating
-//     non-text content cannot be displayed.
+//   - Renders all parts (Text, Data, URL, Raw) using renderPart, concatenated in order.
+//   - If the message has zero parts, returns empty text.
 //   - If the message has a ContextID, includes it as a "context_id:<id>" text
 //     content item.
 //
@@ -20,21 +47,8 @@ import (
 func FormatMessageResponse(msg *a2a.Message) *mcp.CallToolResult {
 	result := &mcp.CallToolResult{}
 
-	text, hasTextParts := extractTextFromMessageParts(msg.Parts)
-	hasAnyParts := len(msg.Parts) > 0
-
-	switch {
-	case hasTextParts:
-		result.Content = append(result.Content, &mcp.TextContent{Text: text})
-	case hasAnyParts:
-		// Message has parts but none are text parts.
-		result.Content = append(result.Content, &mcp.TextContent{
-			Text: "response contained non-text content that cannot be displayed",
-		})
-	default:
-		// No parts at all.
-		result.Content = append(result.Content, &mcp.TextContent{Text: ""})
-	}
+	text := extractContentFromMessageParts(msg.Parts)
+	result.Content = append(result.Content, &mcp.TextContent{Text: text})
 
 	if msg.ContextID != "" {
 		result.Content = append(result.Content, &mcp.TextContent{
@@ -45,29 +59,24 @@ func FormatMessageResponse(msg *a2a.Message) *mcp.CallToolResult {
 	return result
 }
 
-// extractTextFromMessageParts concatenates TextPart content from message parts.
-// Returns the combined text and whether any TextParts were found.
-func extractTextFromMessageParts(parts a2a.ContentParts) (string, bool) {
+// extractContentFromMessageParts renders all parts using renderPart and
+// concatenates results with no separator. Nil parts are skipped.
+func extractContentFromMessageParts(parts a2a.ContentParts) string {
 	var texts []string
-	foundTextPart := false
 
 	for _, part := range parts {
-		if part == nil {
-			continue
-		}
-		if _, ok := part.Content.(a2a.Text); ok {
-			foundTextPart = true
-			texts = append(texts, part.Text())
+		if rendered, ok := renderPart(part); ok {
+			texts = append(texts, rendered)
 		}
 	}
 
-	return strings.Join(texts, ""), foundTextPart
+	return strings.Join(texts, "")
 }
 
 // FormatInterruptedResponse formats a response for a task in an interrupted
 // state (e.g. input-required, auth-required). It includes:
 //   - The agent's status message (explaining what input is needed), or
-//     artifact text if available.
+//     artifact content if available.
 //   - A "state:<stateName>" indicator so callers can programmatically
 //     distinguish this from a completed response.
 //   - The task_id for referencing the task in subsequent operations.
@@ -83,16 +92,9 @@ func FormatInterruptedResponse(task *a2a.Task, stateName string) *mcp.CallToolRe
 		responseText = extractStatusMessageText(task.Status.Message)
 	}
 
-	// Fall back to artifact text if no status message.
+	// Fall back to artifact content if no status message.
 	if responseText == "" {
-		text, hasTextParts := extractTextFromArtifacts(task.Artifacts)
-		hasAnyParts := artifactsHaveAnyParts(task.Artifacts)
-		switch {
-		case hasTextParts:
-			responseText = text
-		case hasAnyParts:
-			responseText = "response contained non-text content that cannot be displayed"
-		}
+		responseText = extractContentFromArtifacts(task.Artifacts)
 	}
 
 	if responseText != "" {
@@ -127,14 +129,13 @@ func FormatInputRequiredResponse(task *a2a.Task) *mcp.CallToolResult {
 	return FormatInterruptedResponse(task, "input-required")
 }
 
-// FormatTaskResponse extracts text content from an A2A Task and formats it
+// FormatTaskResponse extracts content from an A2A Task and formats it
 // as MCP CallToolResult content items.
 //
 // Behavior:
-//   - If the task has artifacts with TextParts, concatenates all TextPart text
-//     values in artifact order separated by newlines between artifacts.
-//   - If the task has artifacts with ONLY non-text parts (no TextParts at all),
-//     returns a message indicating non-text content cannot be displayed.
+//   - Renders all parts (Text, Data, URL, Raw) from artifacts using renderPart.
+//   - Parts within the same artifact are concatenated with no separator.
+//   - Content from different artifacts is separated by newline.
 //   - If the task has no artifacts or artifacts with no parts, returns empty text.
 //   - If the task has a non-empty ID, includes it as a "task_id:<id>" text content item.
 //   - If the task has a ContextID, includes it as a separate text content item
@@ -144,21 +145,8 @@ func FormatInputRequiredResponse(task *a2a.Task) *mcp.CallToolResult {
 func FormatTaskResponse(task *a2a.Task) *mcp.CallToolResult {
 	result := &mcp.CallToolResult{}
 
-	text, hasTextParts := extractTextFromArtifacts(task.Artifacts)
-	hasAnyParts := artifactsHaveAnyParts(task.Artifacts)
-
-	switch {
-	case hasTextParts:
-		result.Content = append(result.Content, &mcp.TextContent{Text: text})
-	case hasAnyParts:
-		// Artifacts exist with parts, but none are text parts.
-		result.Content = append(result.Content, &mcp.TextContent{
-			Text: "response contained non-text content that cannot be displayed",
-		})
-	default:
-		// No artifacts or no parts at all.
-		result.Content = append(result.Content, &mcp.TextContent{Text: ""})
-	}
+	text := extractContentFromArtifacts(task.Artifacts)
+	result.Content = append(result.Content, &mcp.TextContent{Text: text})
 
 	// Include task_id when non-empty so callers can reference this task.
 	if task.ID != "" {
@@ -176,12 +164,11 @@ func FormatTaskResponse(task *a2a.Task) *mcp.CallToolResult {
 	return result
 }
 
-// extractTextFromArtifacts concatenates TextPart content from all artifacts,
-// separated by newlines, in artifact order. It also returns whether any
-// TextParts were found (even if their content is empty).
-func extractTextFromArtifacts(artifacts []*a2a.Artifact) (string, bool) {
+// extractContentFromArtifacts renders all parts from all artifacts using renderPart.
+// Parts within the same artifact are concatenated with no separator.
+// Content from different artifacts is separated by a newline character.
+func extractContentFromArtifacts(artifacts []*a2a.Artifact) string {
 	var artifactTexts []string
-	foundTextPart := false
 
 	for _, artifact := range artifacts {
 		if artifact == nil {
@@ -189,12 +176,8 @@ func extractTextFromArtifacts(artifacts []*a2a.Artifact) (string, bool) {
 		}
 		var parts []string
 		for _, part := range artifact.Parts {
-			if part == nil {
-				continue
-			}
-			if _, ok := part.Content.(a2a.Text); ok {
-				foundTextPart = true
-				parts = append(parts, part.Text())
+			if rendered, ok := renderPart(part); ok {
+				parts = append(parts, rendered)
 			}
 		}
 		if len(parts) > 0 {
@@ -202,19 +185,5 @@ func extractTextFromArtifacts(artifacts []*a2a.Artifact) (string, bool) {
 		}
 	}
 
-	return strings.Join(artifactTexts, "\n"), foundTextPart
-}
-
-// artifactsHaveAnyParts returns true if any artifact contains at least one part
-// (text or non-text).
-func artifactsHaveAnyParts(artifacts []*a2a.Artifact) bool {
-	for _, artifact := range artifacts {
-		if artifact == nil {
-			continue
-		}
-		if len(artifact.Parts) > 0 {
-			return true
-		}
-	}
-	return false
+	return strings.Join(artifactTexts, "\n")
 }

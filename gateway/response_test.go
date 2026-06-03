@@ -95,7 +95,8 @@ func TestFormatTaskResponse_OnlyNonTextParts(t *testing.T) {
 	if !ok {
 		t.Fatal("expected content to be TextContent")
 	}
-	expected := "response contained non-text content that cannot be displayed"
+	// Data parts are now rendered as JSON.
+	expected := `{"key":"value"}`
 	if textContent.Text != expected {
 		t.Errorf("expected text %q, got %q", expected, textContent.Text)
 	}
@@ -152,7 +153,8 @@ func TestFormatTaskResponse_MixedParts(t *testing.T) {
 	if !ok {
 		t.Fatal("expected first content to be TextContent")
 	}
-	expected := "text part more text"
+	// All parts are now rendered: text + JSON data + text.
+	expected := "text part42 more text"
 	if textContent.Text != expected {
 		t.Errorf("expected text %q, got %q", expected, textContent.Text)
 	}
@@ -201,40 +203,31 @@ func TestFormatTaskResponse_ArtifactsWithNoParts(t *testing.T) {
 	}
 }
 
-func TestExtractTextFromArtifacts_NilArtifacts(t *testing.T) {
-	result, found := extractTextFromArtifacts(nil)
+func TestExtractContentFromArtifacts_NilArtifacts(t *testing.T) {
+	result := extractContentFromArtifacts(nil)
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
 	}
-	if found {
-		t.Error("expected found to be false")
-	}
 }
 
-func TestExtractTextFromArtifacts_NilArtifactEntry(t *testing.T) {
-	result, found := extractTextFromArtifacts([]*a2a.Artifact{nil, nil})
+func TestExtractContentFromArtifacts_NilArtifactEntry(t *testing.T) {
+	result := extractContentFromArtifacts([]*a2a.Artifact{nil, nil})
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
 	}
-	if found {
-		t.Error("expected found to be false")
-	}
 }
 
-func TestExtractTextFromArtifacts_MultipleArtifactsSeparatedByNewline(t *testing.T) {
+func TestExtractContentFromArtifacts_MultipleArtifactsSeparatedByNewline(t *testing.T) {
 	artifacts := []*a2a.Artifact{
 		{Parts: a2a.ContentParts{a2a.NewTextPart("first")}},
 		{Parts: a2a.ContentParts{a2a.NewTextPart("second")}},
 		{Parts: a2a.ContentParts{a2a.NewTextPart("third")}},
 	}
 
-	result, found := extractTextFromArtifacts(artifacts)
+	result := extractContentFromArtifacts(artifacts)
 	expected := "first\nsecond\nthird"
 	if result != expected {
 		t.Errorf("expected %q, got %q", expected, result)
-	}
-	if !found {
-		t.Error("expected found to be true")
 	}
 }
 
@@ -502,7 +495,8 @@ func TestFormatMessageResponse_NonTextParts(t *testing.T) {
 	if !ok {
 		t.Fatal("expected TextContent")
 	}
-	expected := "response contained non-text content that cannot be displayed"
+	// Data parts are now rendered as JSON.
+	expected := `{"key":"value"}`
 	if textContent.Text != expected {
 		t.Errorf("expected %q, got %q", expected, textContent.Text)
 	}
