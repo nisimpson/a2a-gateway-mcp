@@ -830,8 +830,9 @@ func TestHandleBroadcastMessage_MessageResponseNonTextParts(t *testing.T) {
 	if r.Status != "success" {
 		t.Errorf("expected success for nontext-agent, got %s", r.Status)
 	}
-	if r.Response != "response contained non-text content that cannot be displayed" {
-		t.Errorf("expected non-text content message, got %q", r.Response)
+	// Data parts are now rendered as JSON.
+	if r.Response != `{"key":"value"}` {
+		t.Errorf("expected JSON rendered data part, got %q", r.Response)
 	}
 }
 

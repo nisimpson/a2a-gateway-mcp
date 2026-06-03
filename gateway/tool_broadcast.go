@@ -36,11 +36,11 @@ func (s *Server) handleBroadcastMessage(ctx context.Context, _ *mcp.CallToolRequ
 		}, nil, nil
 	}
 
-	// Validate message.
-	if err := ValidateMessage(input.Message); err != nil {
+	// Validate that at least one of message or parts is provided.
+	if input.Message == "" && len(input.Parts) == 0 {
 		return &mcp.CallToolResult{
 			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+			Content: []mcp.Content{&mcp.TextContent{Text: "either 'message' or 'parts' is required"}},
 		}, nil, nil
 	}
 
@@ -67,7 +67,7 @@ func (s *Server) handleBroadcastMessage(ctx context.Context, _ *mcp.CallToolRequ
 		wg.Add(1)
 		go func(alias string) {
 			defer wg.Done()
-			result := s.broadcastToAgent(ctx, alias, input.Message, timeoutSeconds)
+			result := s.broadcastToAgent(ctx, alias, input.Message, input.Parts, input.Metadata, timeoutSeconds)
 			mu.Lock()
 			results[alias] = result
 			mu.Unlock()
@@ -91,7 +91,7 @@ func (s *Server) handleBroadcastMessage(ctx context.Context, _ *mcp.CallToolRequ
 }
 
 // broadcastToAgent sends a message to a single agent and returns the result.
-func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, timeoutSeconds int) *broadcastResult {
+func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, parts []InputPart, metadata map[string]any, timeoutSeconds int) *broadcastResult {
 	// Resolve alias from registry.
 	entry := s.registry.Lookup(alias)
 	if entry == nil {
@@ -115,18 +115,29 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, ti
 		}
 	}
 
-	// Requirement: STRM-5.1, STRM-5.2 — use streaming when supported.
-	if supportsStreaming(s.registry, resolved) {
-		sendReq := &a2a.SendMessageRequest{
-			Message: a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(message)),
+	// Build content parts from message/parts input.
+	contentParts, err := buildMessageParts(message, parts)
+	if err != nil {
+		return &broadcastResult{
+			Status: "error",
+			Error:  err.Error(),
 		}
-		return s.broadcastToAgentStreaming(agentCtx, a2aClient, sendReq, resolved, alias, timeoutSeconds)
 	}
 
-	// Build and send A2A message.
-	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(message))
+	// Build A2A message.
+	msg := a2a.NewMessage(a2a.MessageRoleUser, contentParts...)
+
+	// Build SendMessageRequest.
 	sendReq := &a2a.SendMessageRequest{
 		Message: msg,
+	}
+	if len(metadata) > 0 {
+		sendReq.Metadata = metadata
+	}
+
+	// Requirement: STRM-5.1, STRM-5.2 — use streaming when supported.
+	if supportsStreaming(s.registry, resolved) {
+		return s.broadcastToAgentStreaming(agentCtx, a2aClient, sendReq, resolved, alias, timeoutSeconds)
 	}
 
 	result, err := a2aClient.SendMessage(agentCtx, sendReq)
@@ -140,22 +151,10 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, ti
 	// Type switch on result.
 	switch v := result.(type) {
 	case *a2a.Message:
-		text, hasTextParts := extractTextFromMessageParts(v.Parts)
-		if hasTextParts {
-			return &broadcastResult{
-				Status:   "success",
-				Response: text,
-			}
-		}
-		if len(v.Parts) > 0 {
-			return &broadcastResult{
-				Status:   "success",
-				Response: "response contained non-text content that cannot be displayed",
-			}
-		}
+		text := extractContentFromMessageParts(v.Parts)
 		return &broadcastResult{
 			Status:   "success",
-			Response: "",
+			Response: text,
 		}
 
 	case *a2a.Task:
@@ -197,14 +196,8 @@ func (s *Server) broadcastToAgentStreaming(
 		return s.handleBroadcastTaskResult(result.task)
 
 	case result.message != nil:
-		text, hasTextParts := extractTextFromMessageParts(result.message.Parts)
-		if hasTextParts {
-			return &broadcastResult{Status: "success", Response: text}
-		}
-		if len(result.message.Parts) > 0 {
-			return &broadcastResult{Status: "success", Response: "response contained non-text content that cannot be displayed"}
-		}
-		return &broadcastResult{Status: "success", Response: ""}
+		text := extractContentFromMessageParts(result.message.Parts)
+		return &broadcastResult{Status: "success", Response: text}
 
 	case result.terminatedByStatus:
 		task := buildTaskFromState(result.state)
@@ -219,7 +212,7 @@ func (s *Server) broadcastToAgentStreaming(
 func (s *Server) handleBroadcastTaskResult(task *a2a.Task) *broadcastResult {
 	switch task.Status.State {
 	case a2a.TaskStateCompleted:
-		text, _ := extractTextFromArtifacts(task.Artifacts)
+		text := extractContentFromArtifacts(task.Artifacts)
 		return &broadcastResult{
 			Status:   "success",
 			Response: text,
@@ -230,8 +223,7 @@ func (s *Server) handleBroadcastTaskResult(task *a2a.Task) *broadcastResult {
 			responseText = extractStatusMessageText(task.Status.Message)
 		}
 		if responseText == "" {
-			text, _ := extractTextFromArtifacts(task.Artifacts)
-			responseText = text
+			responseText = extractContentFromArtifacts(task.Artifacts)
 		}
 		return &broadcastResult{
 			Status:   "input-required",
@@ -243,8 +235,7 @@ func (s *Server) handleBroadcastTaskResult(task *a2a.Task) *broadcastResult {
 			responseText = extractStatusMessageText(task.Status.Message)
 		}
 		if responseText == "" {
-			text, _ := extractTextFromArtifacts(task.Artifacts)
-			responseText = text
+			responseText = extractContentFromArtifacts(task.Artifacts)
 		}
 		return &broadcastResult{
 			Status:   "auth-required",

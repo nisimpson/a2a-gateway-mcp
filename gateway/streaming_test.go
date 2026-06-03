@@ -893,14 +893,8 @@ func TestPropertyBroadcastOutputEquivalence(t *testing.T) {
 
 			// Non-streaming path: same logic as broadcastToAgent's Message case.
 			var nonStreamingResult *broadcastResult
-			text, hasTextParts := extractTextFromMessageParts(msg.Parts)
-			if hasTextParts {
-				nonStreamingResult = &broadcastResult{Status: "success", Response: text}
-			} else if len(msg.Parts) > 0 {
-				nonStreamingResult = &broadcastResult{Status: "success", Response: "response contained non-text content that cannot be displayed"}
-			} else {
-				nonStreamingResult = &broadcastResult{Status: "success", Response: ""}
-			}
+			text := extractContentFromMessageParts(msg.Parts)
+			nonStreamingResult = &broadcastResult{Status: "success", Response: text}
 
 			// Streaming path: simulate consuming a stream that yields this message.
 			events := []eventOrError{
@@ -915,14 +909,8 @@ func TestPropertyBroadcastOutputEquivalence(t *testing.T) {
 			// Apply the same conversion logic as broadcastToAgentStreaming.
 			var streamingResult *broadcastResult
 			if streamRes.message != nil {
-				msgText, msgHasText := extractTextFromMessageParts(streamRes.message.Parts)
-				if msgHasText {
-					streamingResult = &broadcastResult{Status: "success", Response: msgText}
-				} else if len(streamRes.message.Parts) > 0 {
-					streamingResult = &broadcastResult{Status: "success", Response: "response contained non-text content that cannot be displayed"}
-				} else {
-					streamingResult = &broadcastResult{Status: "success", Response: ""}
-				}
+				msgText := extractContentFromMessageParts(streamRes.message.Parts)
+				streamingResult = &broadcastResult{Status: "success", Response: msgText}
 			} else {
 				return false
 			}

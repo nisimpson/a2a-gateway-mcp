@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -10,12 +12,69 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// buildMessageParts constructs a2a.ContentParts from the input message and parts.
+// Priority: parts > message. At least one must be provided.
+func buildMessageParts(message string, parts []InputPart) (a2a.ContentParts, error) {
+	if len(parts) > 0 {
+		return convertInputParts(parts)
+	}
+	if message != "" {
+		return a2a.ContentParts{a2a.NewTextPart(message)}, nil
+	}
+	return nil, fmt.Errorf("either 'message' or 'parts' is required")
+}
+
+// convertInputParts converts a slice of InputPart to a2a.ContentParts.
+// Each InputPart must have exactly one of Text, Data, URL, or Raw set.
+func convertInputParts(parts []InputPart) (a2a.ContentParts, error) {
+	var result a2a.ContentParts
+	for i, p := range parts {
+		count := 0
+		if p.Text != nil {
+			count++
+		}
+		if p.Data != nil {
+			count++
+		}
+		if p.URL != nil {
+			count++
+		}
+		if p.Raw != nil {
+			count++
+		}
+		if count == 0 {
+			return nil, fmt.Errorf("part at index %d has no content (set exactly one of text, data, url, or raw)", i)
+		}
+		if count > 1 {
+			return nil, fmt.Errorf("part at index %d has multiple content types (set exactly one of text, data, url, or raw)", i)
+		}
+		switch {
+		case p.Text != nil:
+			result = append(result, a2a.NewTextPart(*p.Text))
+		case p.Data != nil:
+			result = append(result, &a2a.Part{Content: a2a.Data{Value: p.Data}})
+		case p.URL != nil:
+			result = append(result, &a2a.Part{Content: a2a.URL(*p.URL)})
+		case p.Raw != nil:
+			decoded, err := base64.StdEncoding.DecodeString(*p.Raw)
+			if err != nil {
+				return nil, fmt.Errorf("part at index %d has invalid base64 in 'raw' field: %v", i, err)
+			}
+			result = append(result, &a2a.Part{Content: a2a.Raw(decoded)})
+		}
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("'parts' must contain at least one element")
+	}
+	return result, nil
+}
+
 const (
 	taskPollInterval = 2 * time.Second
 	taskPollTimeout  = 60 * time.Second
 )
 
-// handleSendMessage sends a text message to a connected A2A agent by alias or URL.
+// handleSendMessage sends a message to a connected A2A agent by alias or URL.
 func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest, input SendMessageInput) (*mcp.CallToolResult, any, error) {
 	// Validate agent identifier is provided.
 	if input.Agent == "" {
@@ -25,8 +84,9 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 		}, nil, nil
 	}
 
-	// Validate message.
-	if err := ValidateMessage(input.Message); err != nil {
+	// Build content parts from message/parts input.
+	contentParts, err := buildMessageParts(input.Message, input.Parts)
+	if err != nil {
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
@@ -48,8 +108,8 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 		contextID = s.contextStore.Get(input.Agent)
 	}
 
-	// Build A2A message with TextPart content.
-	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(input.Message))
+	// Build A2A message with content parts.
+	msg := a2a.NewMessage(a2a.MessageRoleUser, contentParts...)
 	if contextID != "" {
 		msg.ContextID = contextID
 	}
@@ -60,6 +120,9 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 	// Build SendMessageRequest.
 	sendReq := &a2a.SendMessageRequest{
 		Message: msg,
+	}
+	if len(input.Metadata) > 0 {
+		sendReq.Metadata = input.Metadata
 	}
 
 	// Resolve SDK client.
@@ -246,15 +309,14 @@ func (s *Server) pollTaskCompletion(ctx context.Context, a2aClient *a2aclient.Cl
 	}
 }
 
-// extractStatusMessageText extracts text from a task status message's parts.
+// extractStatusMessageText renders all parts from a task status message using
+// renderPart. Parts are concatenated in order with no separator.
 func extractStatusMessageText(msg *a2a.Message) string {
+	var parts []string
 	for _, part := range msg.Parts {
-		if part == nil {
-			continue
-		}
-		if _, ok := part.Content.(a2a.Text); ok {
-			return part.Text()
+		if rendered, ok := renderPart(part); ok {
+			parts = append(parts, rendered)
 		}
 	}
-	return ""
+	return strings.Join(parts, "")
 }

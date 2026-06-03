@@ -568,7 +568,7 @@ func TestHandleSendMessage_ValidationError_EmptyMessage(t *testing.T) {
 	if !ok {
 		t.Fatal("expected TextContent")
 	}
-	if textContent.Text != "message is required and cannot be empty" {
+	if textContent.Text != "either 'message' or 'parts' is required" {
 		t.Errorf("unexpected error message: %q", textContent.Text)
 	}
 }
@@ -1360,7 +1360,8 @@ func TestHandleSendMessage_MessageResponse_NonTextParts(t *testing.T) {
 	if !ok {
 		t.Fatal("expected TextContent")
 	}
-	expected := "response contained non-text content that cannot be displayed"
+	// Data parts are now rendered as JSON.
+	expected := `{"key":"value"}`
 	if textContent.Text != expected {
 		t.Errorf("expected %q, got %q", expected, textContent.Text)
 	}
@@ -1706,5 +1707,144 @@ func TestHandleSendMessage_WithTaskID_VerifyJSONBody(t *testing.T) {
 	}
 	if taskID != "my-task-id-999" {
 		t.Errorf("expected taskId %q in JSON body, got %q", "my-task-id-999", taskID)
+	}
+}
+
+// --- Integration Tests for message-metadata feature (6.12, 6.13) ---
+
+// Feature: message-metadata, Integration test: send_message with metadata reaches agent
+// **Validates: META-1.3**
+
+func TestHandleSendMessage_MetadataReachesAgent(t *testing.T) {
+	var receivedMetadata map[string]any
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		var params a2a.SendMessageRequest
+		_ = json.Unmarshal(req.Params, &params)
+		receivedMetadata = params.Metadata
+
+		task := &a2a.Task{
+			ID:     "task-meta-1",
+			Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+			Artifacts: []*a2a.Artifact{
+				{Parts: a2a.ContentParts{a2a.NewTextPart("metadata received")}},
+			},
+		}
+		writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("meta-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent:   "meta-agent",
+		Message: "hello with metadata",
+		Metadata: map[string]any{
+			"caller":  "test-client",
+			"version": float64(2),
+			"nested":  map[string]any{"key": "value"},
+		},
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	// Verify the metadata was received by the agent.
+	if receivedMetadata == nil {
+		t.Fatal("expected metadata to be received by agent")
+	}
+	if receivedMetadata["caller"] != "test-client" {
+		t.Errorf("expected metadata[caller]=%q, got %v", "test-client", receivedMetadata["caller"])
+	}
+	if receivedMetadata["version"] != float64(2) {
+		t.Errorf("expected metadata[version]=%v, got %v", float64(2), receivedMetadata["version"])
+	}
+	nested, ok := receivedMetadata["nested"].(map[string]any)
+	if !ok {
+		t.Fatal("expected nested metadata to be a map")
+	}
+	if nested["key"] != "value" {
+		t.Errorf("expected nested[key]=%q, got %v", "value", nested["key"])
+	}
+}
+
+// Feature: message-metadata, Integration test: send_message with data part reaches agent
+// **Validates: META-2.9**
+
+func TestHandleSendMessage_DataPartReachesAgent(t *testing.T) {
+	var receivedParts []json.RawMessage
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+
+		// Parse the raw JSON to extract parts.
+		var rpcReq map[string]any
+		_ = json.Unmarshal(body, &rpcReq)
+
+		// Extract message.parts from params.
+		params, _ := rpcReq["params"].(map[string]any)
+		message, _ := params["message"].(map[string]any)
+		partsRaw, _ := message["parts"].([]any)
+		for _, p := range partsRaw {
+			pBytes, _ := json.Marshal(p)
+			receivedParts = append(receivedParts, pBytes)
+		}
+
+		// Respond with success using the request ID.
+		var reqParsed jsonrpcTestRequest
+		_ = json.Unmarshal(body, &reqParsed)
+
+		task := &a2a.Task{
+			ID:     "task-data-1",
+			Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+			Artifacts: []*a2a.Artifact{
+				{Parts: a2a.ContentParts{a2a.NewTextPart("data received")}},
+			},
+		}
+		writeJSONRPCResult(w, reqParsed.ID, jsonrpcTaskResult(task))
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("data-agent", agent.URL)
+
+	input := SendMessageInput{
+		Agent: "data-agent",
+		Parts: []InputPart{
+			{Data: map[string]any{"action": "deploy", "targets": []any{"prod", "staging"}}},
+		},
+	}
+
+	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+
+	// Verify at least one part was sent.
+	if len(receivedParts) == 0 {
+		t.Fatal("expected at least one part to be received by agent")
+	}
+
+	// Parse the first part and verify it contains structured data.
+	var firstPart map[string]any
+	if err := json.Unmarshal(receivedParts[0], &firstPart); err != nil {
+		t.Fatalf("failed to parse first received part: %v", err)
+	}
+
+	// The part should have a "data" field with our structured data.
+	// The a2a SDK serializes Data directly as {"data": <value>}.
+	dataField, ok := firstPart["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected part to have 'data' field as map, got %T: %v", firstPart["data"], firstPart)
+	}
+
+	if dataField["action"] != "deploy" {
+		t.Errorf("expected action=%q, got %v", "deploy", dataField["action"])
 	}
 }
