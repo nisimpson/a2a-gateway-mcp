@@ -77,6 +77,51 @@ type DiscoverAgentsInput struct {
 	Headers      map[string]string `json:"headers,omitempty" jsonschema:"optional HTTP headers for directory authentication (max 20 entries)"`
 }
 
+// Requirements: CAC-4.2, CAC-4.3
+
+// CallerSkill represents a skill on the caller agent card.
+type CallerSkill struct {
+	Name        string `json:"name" jsonschema:"skill name (required)"`
+	Description string `json:"description,omitempty" jsonschema:"strongly recommended — provide one even if you need to infer it from the skill name"`
+}
+
+// Requirements: CAC-1.6, CAC-4.4
+
+// CallerCapabilities describes supported A2A capabilities.
+type CallerCapabilities struct {
+	Streaming         bool `json:"streaming,omitempty" jsonschema:"whether the caller supports streaming"`
+	PushNotifications bool `json:"pushNotifications,omitempty" jsonschema:"whether the caller supports push notifications"`
+}
+
+// Requirements: CAC-4.1
+
+// CallerCard is the stored representation of the caller agent card.
+type CallerCard struct {
+	Name         string              `json:"name"`
+	Description  string              `json:"description"`
+	URL          string              `json:"url,omitempty"`
+	Skills       []CallerSkill       `json:"skills,omitempty"`
+	Capabilities *CallerCapabilities `json:"capabilities,omitempty"`
+}
+
+// Requirements: CAC-1.2, CAC-1.3, CAC-1.4, CAC-1.5, CAC-1.6, CAC-1.7
+
+// CreateCallerCardInput is the input schema for the create_caller_card tool.
+type CreateCallerCardInput struct {
+	Name         string              `json:"name" jsonschema:"the caller agent's display name (required)"`
+	Description  string              `json:"description" jsonschema:"what the caller agent does (required)"`
+	URL          string              `json:"url,omitempty" jsonschema:"reachable endpoint for callbacks, if available"`
+	Skills       []CallerSkill       `json:"skills,omitempty" jsonschema:"list of skills the caller agent supports"`
+	Capabilities *CallerCapabilities `json:"capabilities,omitempty" jsonschema:"supported A2A capabilities (e.g., streaming, pushNotifications)"`
+	MetadataKey  string              `json:"metadata_key,omitempty" jsonschema:"metadata attribute name the card will be injected under (default: caller_agent_card)"`
+}
+
+// ViewCallerCardInput is the input schema for the view_caller_card tool (empty).
+type ViewCallerCardInput struct{}
+
+// RemoveCallerCardInput is the input schema for the remove_caller_card tool (empty).
+type RemoveCallerCardInput struct{}
+
 // registerTools registers all MCP tools with the server.
 func (s *Server) registerTools() {
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
@@ -127,4 +172,21 @@ Use 'message' for simple plain-text broadcasts. Use 'parts' when you need to sen
 		Name:        "discover_agents",
 		Description: "Discover available agents from a remote agent directory service",
 	}, s.handleDiscoverAgents)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name: "create_caller_card",
+		Description: `Register a caller agent card that is automatically included on all outbound messages (send_message and broadcast_message).
+
+Calling again replaces the previous card. This enables target agents to discover the caller's capabilities and delegate tasks back without requiring a .well-known/agent.json endpoint.`,
+	}, s.handleCreateCallerCard)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "view_caller_card",
+		Description: "View the currently registered caller agent card, if any",
+	}, s.handleViewCallerCard)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "remove_caller_card",
+		Description: "Remove the registered caller agent card so it is no longer injected on outbound messages",
+	}, s.handleRemoveCallerCard)
 }

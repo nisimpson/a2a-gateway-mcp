@@ -139,6 +139,8 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 	if len(input.Metadata) > 0 {
 		sendReq.Metadata = input.Metadata
 	}
+	// Requirement: CAC-2.1 — inject caller card into outbound metadata
+	sendReq.Metadata = s.injectCallerCard(sendReq.Metadata)
 
 	// Resolve SDK client.
 	a2aClient, err := s.clients.Resolve(ctx, resolved)

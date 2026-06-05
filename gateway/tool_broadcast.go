@@ -134,6 +134,7 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 	if len(metadata) > 0 {
 		sendReq.Metadata = metadata
 	}
+	sendReq.Metadata = s.injectCallerCard(sendReq.Metadata)
 
 	// Requirement: STRM-5.1, STRM-5.2 — use streaming when supported.
 	if supportsStreaming(s.registry, resolved) {
