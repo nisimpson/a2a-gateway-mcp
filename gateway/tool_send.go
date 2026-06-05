@@ -74,6 +74,21 @@ const (
 	taskPollTimeout  = 60 * time.Second
 )
 
+// effectivePollTimeout returns the poll timeout to use for a request.
+// Per-request PollTimeoutSeconds takes precedence over the server default.
+// A negative value means no timeout (wait indefinitely).
+func (s *Server) effectivePollTimeout(requestSeconds *int) time.Duration {
+	if requestSeconds != nil {
+		if *requestSeconds < 0 {
+			return 0 // sentinel: no timeout
+		}
+		if *requestSeconds > 0 {
+			return time.Duration(*requestSeconds) * time.Second
+		}
+	}
+	return s.pollTimeout
+}
+
 // handleSendMessage sends a message to a connected A2A agent by alias or URL.
 func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest, input SendMessageInput) (*mcp.CallToolResult, any, error) {
 	// Validate agent identifier is provided.
@@ -133,7 +148,7 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 
 	// Requirement: STRM-1.1, STRM-1.5 — route to streaming when supported.
 	if supportsStreaming(s.registry, resolved) {
-		result, err := s.handleStreamingMessage(ctx, req, a2aClient, sendReq, resolved, input.Agent)
+		result, err := s.handleStreamingMessage(ctx, req, a2aClient, sendReq, resolved, input.Agent, s.effectiveStreamTimeout(input.PollTimeoutSeconds))
 		if err != nil {
 			return handleA2AError(err), nil, nil
 		}
@@ -149,7 +164,7 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 	// Type switch on result.
 	switch v := result.(type) {
 	case *a2a.Task:
-		return s.handleTaskResult(ctx, a2aClient, v, resolved, input.Agent)
+		return s.handleTaskResult(ctx, a2aClient, v, resolved, input.Agent, s.effectivePollTimeout(input.PollTimeoutSeconds))
 	case *a2a.Message:
 		// Store context_id if alias-based.
 		if resolved.IsAlias && v.ContextID != "" {
@@ -166,7 +181,7 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 
 // handleTaskResult processes a *a2a.Task result from SendMessage, handling
 // all task states including polling for non-terminal states.
-func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Client, task *a2a.Task, resolved *ResolveResult, agent string) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Client, task *a2a.Task, resolved *ResolveResult, agent string, pollTimeout time.Duration) (*mcp.CallToolResult, any, error) {
 	switch task.Status.State {
 	case a2a.TaskStateCompleted:
 		if resolved.IsAlias && task.ContextID != "" {
@@ -223,8 +238,8 @@ func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Clie
 			}, nil, nil
 		}
 
-		// Poll up to 60s for non-terminal states.
-		polledTask, err := s.pollTaskCompletion(ctx, a2aClient, task.ID)
+		// Poll for non-terminal states up to the configured timeout.
+		polledTask, err := s.pollTaskCompletion(ctx, a2aClient, task.ID, pollTimeout)
 		if err != nil {
 			return &mcp.CallToolResult{
 				IsError: true,
@@ -280,9 +295,12 @@ func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Clie
 }
 
 // pollTaskCompletion polls the agent for task status every 2s until a terminal
-// state is reached or 60s elapses.
-func (s *Server) pollTaskCompletion(ctx context.Context, a2aClient *a2aclient.Client, taskID a2a.TaskID) (*a2a.Task, error) {
-	deadline := time.Now().Add(taskPollTimeout)
+// state is reached or the given timeout elapses. A zero timeout means no deadline.
+func (s *Server) pollTaskCompletion(ctx context.Context, a2aClient *a2aclient.Client, taskID a2a.TaskID, timeout time.Duration) (*a2a.Task, error) {
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+	}
 	ticker := time.NewTicker(taskPollInterval)
 	defer ticker.Stop()
 
@@ -291,8 +309,8 @@ func (s *Server) pollTaskCompletion(ctx context.Context, a2aClient *a2aclient.Cl
 		case <-ctx.Done():
 			return nil, fmt.Errorf("timeout waiting for task completion: context canceled")
 		case <-ticker.C:
-			if time.Now().After(deadline) {
-				return nil, fmt.Errorf("timeout waiting for task completion after %s", taskPollTimeout)
+			if !deadline.IsZero() && time.Now().After(deadline) {
+				return nil, fmt.Errorf("timeout waiting for task completion after %s", timeout)
 			}
 
 			task, err := a2aClient.GetTask(ctx, &a2a.GetTaskRequest{ID: taskID})

@@ -39,12 +39,13 @@ type InputPart struct {
 
 // SendMessageInput is the input schema for the send_message tool.
 type SendMessageInput struct {
-	Agent     string         `json:"agent" jsonschema:"agent alias from registry or full HTTP/HTTPS URL"`
-	Message   string         `json:"message,omitempty" jsonschema:"plain text message to send. Use this for simple text-only messages. Mutually exclusive with 'parts' — if both are provided, 'parts' takes precedence."`
-	Parts     []InputPart    `json:"parts,omitempty" jsonschema:"structured message parts for multi-part or non-text content. Use this when sending JSON data, URLs, or mixed content. Takes precedence over 'message' if both are provided."`
-	ContextID string         `json:"context_id,omitempty" jsonschema:"optional context ID to continue an existing conversation"`
-	TaskID    string         `json:"task_id,omitempty" jsonschema:"optional task ID to reference an existing task for follow-up messages"`
-	Metadata  map[string]any `json:"metadata,omitempty" jsonschema:"optional metadata for A2A protocol extensions (e.g. caller capabilities)"`
+	Agent              string         `json:"agent" jsonschema:"agent alias from registry or full HTTP/HTTPS URL"`
+	Message            string         `json:"message,omitempty" jsonschema:"plain text message to send. Use this for simple text-only messages. Mutually exclusive with 'parts' — if both are provided, 'parts' takes precedence."`
+	Parts              []InputPart    `json:"parts,omitempty" jsonschema:"structured message parts for multi-part or non-text content. Use this when sending JSON data, URLs, or mixed content. Takes precedence over 'message' if both are provided."`
+	ContextID          string         `json:"context_id,omitempty" jsonschema:"optional context ID to continue an existing conversation"`
+	TaskID             string         `json:"task_id,omitempty" jsonschema:"optional task ID to reference an existing task for follow-up messages"`
+	Metadata           map[string]any `json:"metadata,omitempty" jsonschema:"optional metadata for A2A protocol extensions (e.g. caller capabilities)"`
+	PollTimeoutSeconds *int           `json:"poll_timeout_seconds,omitempty" jsonschema:"max seconds to wait for task completion when polling or streaming (negative = no timeout, default: server configured timeout)"`
 }
 
 // BroadcastMessageInput is the input schema for the broadcast_message tool.
