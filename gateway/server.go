@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -73,6 +74,11 @@ type Server struct {
 	clients       *clientResolver
 	pollTimeout   time.Duration
 	streamTimeout time.Duration
+
+	// Requirement: CAC-1.9 — global caller card state
+	callerCard    *CallerCard // nil when no card is registered
+	callerCardKey string      // metadata key; empty means use default
+	callerCardMu  sync.RWMutex
 }
 
 // NewServer creates a new gateway server with the given options.
