@@ -19,9 +19,11 @@ type Option func(*serverConfig)
 
 // serverConfig holds immutable configuration set at initialization.
 type serverConfig struct {
-	httpClient *http.Client
-	name       string
-	version    string
+	httpClient    *http.Client
+	name          string
+	version       string
+	pollTimeout   time.Duration
+	streamTimeout time.Duration
 }
 
 // WithHTTPClient sets a custom http.Client for all outbound A2A requests.
@@ -45,22 +47,42 @@ func WithVersion(version string) Option {
 	}
 }
 
+// WithPollTimeout sets the default timeout for polling non-terminal task states
+// (default: 60s). Can be overridden per-request via poll_timeout_seconds.
+func WithPollTimeout(d time.Duration) Option {
+	return func(cfg *serverConfig) {
+		cfg.pollTimeout = d
+	}
+}
+
+// WithStreamTimeout sets the default timeout for SSE streaming responses
+// (default: 60s). Can be overridden per-request via poll_timeout_seconds.
+func WithStreamTimeout(d time.Duration) Option {
+	return func(cfg *serverConfig) {
+		cfg.streamTimeout = d
+	}
+}
+
 // Server is the A2A Gateway MCP server. It wraps an mcp.Server and manages
 // the agent registry and context store.
 type Server struct {
-	mcpServer    *mcp.Server
-	registry     *AgentRegistry
-	contextStore *ContextStore
-	httpClient   *http.Client
-	clients      *clientResolver
+	mcpServer     *mcp.Server
+	registry      *AgentRegistry
+	contextStore  *ContextStore
+	httpClient    *http.Client
+	clients       *clientResolver
+	pollTimeout   time.Duration
+	streamTimeout time.Duration
 }
 
 // NewServer creates a new gateway server with the given options.
 func NewServer(opts ...Option) *Server {
 	cfg := &serverConfig{
-		httpClient: &http.Client{Timeout: defaultHTTPTimeout},
-		name:       defaultServerName,
-		version:    defaultServerVersion,
+		httpClient:    &http.Client{Timeout: defaultHTTPTimeout},
+		name:          defaultServerName,
+		version:       defaultServerVersion,
+		pollTimeout:   taskPollTimeout,
+		streamTimeout: defaultStreamTimeout,
 	}
 
 	for _, opt := range opts {
@@ -73,10 +95,12 @@ func NewServer(opts ...Option) *Server {
 	}, nil)
 
 	s := &Server{
-		mcpServer:    mcpServer,
-		registry:     NewAgentRegistry(),
-		contextStore: NewContextStore(),
-		httpClient:   cfg.httpClient,
+		mcpServer:     mcpServer,
+		registry:      NewAgentRegistry(),
+		contextStore:  NewContextStore(),
+		httpClient:    cfg.httpClient,
+		pollTimeout:   cfg.pollTimeout,
+		streamTimeout: cfg.streamTimeout,
 	}
 
 	s.clients = newClientResolver(s.registry, s.httpClient)

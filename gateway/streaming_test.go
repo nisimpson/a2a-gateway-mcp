@@ -1536,9 +1536,9 @@ func TestConsumeStream_ParentContextCancellation(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from parent context timeout")
 	}
-	// Should be "stream interrupted" since we received one event before the error
-	if !contains(err.Error(), "stream interrupted") {
-		t.Errorf("expected 'stream interrupted' in error, got %q", err.Error())
+	// Should be a timeout error since we received one event before deadline
+	if !contains(err.Error(), "stream timeout") {
+		t.Errorf("expected 'stream timeout' in error, got %q", err.Error())
 	}
 }
 

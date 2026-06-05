@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"log"
@@ -12,9 +13,32 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// streamTimeout is the maximum duration the gateway will wait for an SSE
+// defaultStreamTimeout is the maximum duration the gateway will wait for an SSE
 // stream to deliver a terminal or interrupted state before aborting.
-const streamTimeout = 60 * time.Second
+const defaultStreamTimeout = 60 * time.Second
+
+var (
+	// ErrStreamTimeout is returned when a stream times out after receiving events.
+	ErrStreamTimeout = errors.New("stream timeout")
+
+	// ErrStreamConnectionTimeout is returned when a stream times out before receiving any events.
+	ErrStreamConnectionTimeout = errors.New("stream connection timeout")
+)
+
+// effectiveStreamTimeout returns the stream timeout to use for a request.
+// Per-request PollTimeoutSeconds takes precedence over the server default.
+// A negative value means no timeout (wait indefinitely).
+func (s *Server) effectiveStreamTimeout(requestSeconds *int) time.Duration {
+	if requestSeconds != nil {
+		if *requestSeconds < 0 {
+			return 0 // sentinel: no timeout
+		}
+		if *requestSeconds > 0 {
+			return time.Duration(*requestSeconds) * time.Second
+		}
+	}
+	return s.streamTimeout
+}
 
 // supportsStreaming returns true if the resolved agent has a stored AgentCard
 // with Capabilities.Streaming set to true. Returns false for URL-based
@@ -114,9 +138,16 @@ func (s *Server) handleStreamingMessage(
 	sendReq *a2a.SendMessageRequest,
 	resolved *ResolveResult,
 	agent string,
+	timeout time.Duration,
 ) (*mcp.CallToolResult, error) {
-	// Requirement: STRM-3.1, STRM-3.2, STRM-3.3 — enforce 60s stream timeout.
-	streamCtx, cancel := context.WithTimeout(ctx, streamTimeout)
+	// Requirement: STRM-3.1, STRM-3.2, STRM-3.3 — enforce stream timeout.
+	var streamCtx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		streamCtx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		streamCtx, cancel = context.WithCancel(ctx)
+	}
 	defer cancel()
 
 	// Requirement: STRM-2.1 — use the same request for streaming.
@@ -145,9 +176,16 @@ func (s *Server) handleStreamingMessage(
 	result, err := consumeStream(streamCtx, events, state)
 	if err != nil {
 		// Requirement: STRM-7.1, STRM-7.2 — return error as MCP error result.
+		errMsg := err.Error()
+		switch {
+		case errors.Is(err, ErrStreamTimeout):
+			errMsg = fmt.Sprintf("timeout waiting for streaming response to complete (timed out after %s)", timeout)
+		case errors.Is(err, ErrStreamConnectionTimeout):
+			errMsg = fmt.Sprintf("stream connection timed out after %s", timeout)
+		}
 		return &mcp.CallToolResult{
 			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+			Content: []mcp.Content{&mcp.TextContent{Text: errMsg}},
 		}, nil
 	}
 
@@ -249,6 +287,12 @@ func (s *Server) formatStreamTask(task *a2a.Task) *mcp.CallToolResult {
 func consumeStream(_ context.Context, events iter.Seq2[a2a.Event, error], state *streamState) (*streamResult, error) {
 	for event, err := range events {
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				if state.receivedEvents {
+					return nil, ErrStreamTimeout
+				}
+				return nil, ErrStreamConnectionTimeout
+			}
 			if state.receivedEvents {
 				return nil, fmt.Errorf("stream interrupted: %w", err)
 			}

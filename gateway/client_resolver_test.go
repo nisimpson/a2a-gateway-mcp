@@ -200,7 +200,7 @@ func TestHandleTaskResult_UnrecognizedState_ReturnsProtocolError(t *testing.T) {
 	}
 	resolved := &ResolveResult{IsAlias: false, URL: "http://example.com"}
 
-	result, _, err := srv.handleTaskResult(context.Background(), nil, task, resolved, "")
+	result, _, err := srv.handleTaskResult(context.Background(), nil, task, resolved, "", srv.pollTimeout)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestHandleTaskResult_UnrecognizedState_WithID_NoPolling(t *testing.T) {
 	}
 	resolved := &ResolveResult{IsAlias: false, URL: "http://example.com"}
 
-	result, _, err := srv.handleTaskResult(context.Background(), nil, task, resolved, "")
+	result, _, err := srv.handleTaskResult(context.Background(), nil, task, resolved, "", srv.pollTimeout)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
