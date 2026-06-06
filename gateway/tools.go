@@ -6,9 +6,11 @@ import (
 
 // ConnectAgentInput is the input schema for the connect_agent tool.
 type ConnectAgentInput struct {
-	Alias    string            `json:"alias" jsonschema:"short alias for the agent (lowercase alphanumeric and hyphens only, max 64 chars)"`
-	AgentURL string            `json:"agent_url" jsonschema:"HTTP or HTTPS URL of the A2A agent"`
-	Headers  map[string]string `json:"headers,omitempty" jsonschema:"optional HTTP headers to include on all requests to this agent (max 20 entries)"`
+	Alias          string            `json:"alias" jsonschema:"short alias for the agent (lowercase alphanumeric and hyphens only, max 64 chars)"`
+	AgentURL       string            `json:"agent_url" jsonschema:"HTTP or HTTPS URL of the A2A agent"`
+	Headers        map[string]string `json:"headers,omitempty" jsonschema:"optional HTTP headers to include on all requests to this agent (max 20 entries)"`
+	RateLimitRPS   *float64          `json:"rate_limit_rps,omitempty" jsonschema:"requests per second rate limit for this agent (must be provided with rate_limit_burst)"`
+	RateLimitBurst *int              `json:"rate_limit_burst,omitempty" jsonschema:"burst capacity for this agent's rate limiter (must be provided with rate_limit_rps)"`
 }
 
 // DisconnectAgentInput is the input schema for the disconnect_agent tool.

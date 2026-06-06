@@ -38,6 +38,26 @@ func (s *Server) handleConnectAgent(ctx context.Context, _ *mcp.CallToolRequest,
 		}, nil, nil
 	}
 
+	// Validate rate limit parameters.
+	if (input.RateLimitRPS != nil) != (input.RateLimitBurst != nil) {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{&mcp.TextContent{Text: "rate_limit_rps and rate_limit_burst must both be provided together"}},
+		}, nil, nil
+	}
+	if input.RateLimitRPS != nil && *input.RateLimitRPS < 0 {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{&mcp.TextContent{Text: "rate_limit_rps must be non-negative"}},
+		}, nil, nil
+	}
+	if input.RateLimitBurst != nil && *input.RateLimitBurst < 0 {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{&mcp.TextContent{Text: "rate_limit_burst must be non-negative"}},
+		}, nil, nil
+	}
+
 	// Check if alias already exists; if so, evict cached client and clear context if URL changed.
 	existing := s.registry.Lookup(input.Alias)
 	if existing != nil {
@@ -49,6 +69,21 @@ func (s *Server) handleConnectAgent(ctx context.Context, _ *mcp.CallToolRequest,
 
 	// Add or update the registry entry.
 	s.registry.Connect(input.Alias, input.AgentURL, input.Headers)
+
+	// Create or replace the rate limiter for the agent.
+	if input.RateLimitRPS != nil && input.RateLimitBurst != nil {
+		// Per-agent rate limit specified.
+		cfg := &RateLimitConfig{RequestsPerSecond: *input.RateLimitRPS, Burst: *input.RateLimitBurst}
+		if cfg.IsDisabled() {
+			// Explicitly disabled (zero RPS or burst).
+			s.rateLimiters.Remove(input.Alias)
+		} else {
+			s.rateLimiters.Set(input.Alias, cfg.RequestsPerSecond, cfg.Burst)
+		}
+	} else if s.defaultRateLimit != nil && !s.defaultRateLimit.IsDisabled() {
+		// No per-agent config; apply global default.
+		s.rateLimiters.Set(input.Alias, s.defaultRateLimit.RequestsPerSecond, s.defaultRateLimit.Burst)
+	}
 
 	// Attempt to fetch the AgentCard (best-effort; failure does not fail connect).
 	card := s.fetchAgentCard(ctx, input.AgentURL, input.Headers)

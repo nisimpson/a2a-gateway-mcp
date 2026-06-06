@@ -10,7 +10,7 @@ An MCP server that bridges the [Model Context Protocol](https://modelcontextprot
 
 a2a-gateway-mcp provides two main packages:
 
-- **`gateway`** — An MCP server library that exposes 7 tools for managing and communicating with A2A agents through an ephemeral, session-scoped registry.
+- **`gateway`** — An MCP server library that exposes 12 tools for managing and communicating with A2A agents through an ephemeral, session-scoped registry. Includes per-agent rate limiting, automatic streaming transport, structured message parts, and caller agent card injection.
 - **`directory`** — A server-side agent directory service that stores agent cards and serves them over HTTP, acting as the counterpart to the gateway's `discover_agents` tool.
 
 The project also ships a standalone CLI binary that runs the gateway on stdio transport, ready to plug into any MCP-compatible client.
@@ -83,17 +83,22 @@ func main() {
 
 ## MCP Tools
 
-The gateway exposes 7 tools to MCP clients:
+The gateway exposes 12 tools to MCP clients:
 
 | Tool | Description |
 |------|-------------|
 | `connect_agent` | Register a remote A2A agent with a friendly alias |
 | `disconnect_agent` | Remove a registered agent by alias |
-| `list_agents` | List all connected agents with their aliases and URLs |
+| `list_agents` | List all connected agents with aliases, URLs, and rate limits |
 | `get_agent_card` | Retrieve an agent's capabilities from its card endpoint |
-| `send_message` | Send a text message to an agent by alias or URL |
+| `send_message` | Send a text or multi-part message to an agent by alias or URL |
+| `get_task` | Retrieve the current state of a previously initiated task |
+| `cancel_task` | Cancel a running task on an A2A agent |
 | `broadcast_message` | Send the same message to multiple agents concurrently |
 | `discover_agents` | Query a remote agent directory for available agents |
+| `create_caller_card` | Register a caller agent card for automatic outbound injection |
+| `view_caller_card` | View the currently registered caller agent card |
+| `remove_caller_card` | Remove the caller agent card |
 
 ### connect_agent
 
@@ -105,9 +110,13 @@ Register an A2A agent with an alias for easy reference:
   "agent_url": "https://agent.example.com",
   "headers": {
     "Authorization": "Bearer token123"
-  }
+  },
+  "rate_limit_rps": 10.0,
+  "rate_limit_burst": 20
 }
 ```
+
+Optional `rate_limit_rps` and `rate_limit_burst` set a per-agent rate limit. Both must be provided together. Omit them to use the server's global default (if configured) or unlimited throughput.
 
 ### send_message
 
@@ -120,7 +129,20 @@ Send a message to a connected agent:
 }
 ```
 
-The gateway manages conversation context automatically — subsequent messages to the same agent continue the conversation.
+For structured or multi-part content, use `parts` instead of `message`:
+
+```json
+{
+  "agent": "code-reviewer",
+  "parts": [
+    {"text": "Analyze this data:"},
+    {"data": {"metrics": [1, 2, 3]}},
+    {"url": "https://example.com/report.pdf"}
+  ]
+}
+```
+
+The gateway manages conversation context automatically — subsequent messages to the same agent continue the conversation. If the target agent supports streaming, the gateway uses SSE transport internally for lower latency (transparent to callers).
 
 ### broadcast_message
 
@@ -147,6 +169,21 @@ Query an agent directory service:
   "limit": 5
 }
 ```
+
+### create_caller_card
+
+Register a caller agent card that gets automatically injected into all outbound messages. This lets target agents discover your capabilities without a `.well-known/agent.json` endpoint:
+
+```json
+{
+  "name": "my-assistant",
+  "description": "An AI coding assistant",
+  "skills": [{"name": "code-review", "description": "Reviews code for bugs"}],
+  "capabilities": {"streaming": true}
+}
+```
+
+Calling again replaces the previous card. Use `view_caller_card` to inspect and `remove_caller_card` to clear.
 
 ## Agent Directory
 
@@ -261,8 +298,24 @@ gateway.NewServer(
     gateway.WithName("custom-name"),
     gateway.WithVersion("2.0.0"),
     gateway.WithHTTPClient(customClient),
+    gateway.WithRateLimit(10.0, 20), // 10 req/s, burst of 20 (global default)
+    gateway.WithPollTimeout(90*time.Second),
+    gateway.WithStreamTimeout(90*time.Second),
 )
 ```
+
+### Rate Limiting
+
+The gateway supports per-agent rate limiting using a token bucket algorithm. Configure a global default at server init, or set per-agent limits at connect time:
+
+```go
+// Global default: all agents get 10 req/s with burst of 20
+srv := gateway.NewServer(gateway.WithRateLimit(10.0, 20))
+```
+
+Per-agent overrides are set via the `connect_agent` tool's `rate_limit_rps` and `rate_limit_burst` parameters. Setting `rate_limit_rps` to zero disables rate limiting for that agent. When no global default is configured and no per-agent limit is set, throughput is unlimited (backward compatible).
+
+Rate-limited requests return an error with the agent alias and estimated wait time. In broadcasts, rate limits are evaluated independently per agent — some may succeed while others are rate-limited.
 
 ## Development
 

@@ -20,11 +20,13 @@ type Option func(*serverConfig)
 
 // serverConfig holds immutable configuration set at initialization.
 type serverConfig struct {
-	httpClient    *http.Client
-	name          string
-	version       string
-	pollTimeout   time.Duration
-	streamTimeout time.Duration
+	httpClient     *http.Client
+	name           string
+	version        string
+	pollTimeout    time.Duration
+	streamTimeout  time.Duration
+	rateLimitRPS   float64
+	rateLimitBurst int
 }
 
 // WithHTTPClient sets a custom http.Client for all outbound A2A requests.
@@ -64,6 +66,18 @@ func WithStreamTimeout(d time.Duration) Option {
 	}
 }
 
+// WithRateLimit sets the global default rate limit applied to all agents that
+// do not specify a per-agent override at connect time. requestsPerSecond
+// controls the sustained request rate and burst controls the maximum number of
+// requests allowed in a single burst. Zero values for either parameter disable
+// rate limiting (all requests are allowed).
+func WithRateLimit(requestsPerSecond float64, burst int) Option {
+	return func(cfg *serverConfig) {
+		cfg.rateLimitRPS = requestsPerSecond
+		cfg.rateLimitBurst = burst
+	}
+}
+
 // Server is the A2A Gateway MCP server. It wraps an mcp.Server and manages
 // the agent registry and context store.
 type Server struct {
@@ -74,6 +88,10 @@ type Server struct {
 	clients       *clientResolver
 	pollTimeout   time.Duration
 	streamTimeout time.Duration
+
+	// Rate limiting — Requirement: RLIM-3.1
+	rateLimiters     *RateLimiterRegistry
+	defaultRateLimit *RateLimitConfig // nil means no global default (unlimited)
 
 	// Requirement: CAC-1.9 — global caller card state
 	callerCard    *CallerCard // nil when no card is registered
@@ -107,6 +125,15 @@ func NewServer(opts ...Option) *Server {
 		httpClient:    cfg.httpClient,
 		pollTimeout:   cfg.pollTimeout,
 		streamTimeout: cfg.streamTimeout,
+		rateLimiters:  NewRateLimiterRegistry(),
+	}
+
+	// Set global default rate limit if both RPS and burst are positive.
+	if cfg.rateLimitRPS > 0 && cfg.rateLimitBurst > 0 {
+		s.defaultRateLimit = &RateLimitConfig{
+			RequestsPerSecond: cfg.rateLimitRPS,
+			Burst:             cfg.rateLimitBurst,
+		}
 	}
 
 	s.clients = newClientResolver(s.registry, s.httpClient)
