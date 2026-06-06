@@ -3,14 +3,16 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // listAgentEntry is the JSON representation of an agent in the list response.
 type listAgentEntry struct {
-	Alias string `json:"alias"`
-	URL   string `json:"url"`
+	Alias     string `json:"alias"`
+	URL       string `json:"url"`
+	RateLimit string `json:"rate_limit"`
 }
 
 // handleListAgents returns a JSON array of all currently connected agents
@@ -20,9 +22,17 @@ func (s *Server) handleListAgents(_ context.Context, _ *mcp.CallToolRequest, _ L
 
 	result := make([]listAgentEntry, len(entries))
 	for i, entry := range entries {
+		var rateLimit string
+		rps, burst, exists := s.rateLimiters.Get(entry.Alias)
+		if exists {
+			rateLimit = fmt.Sprintf("%.2f rps, burst %d", rps, burst)
+		} else {
+			rateLimit = "unlimited"
+		}
 		result[i] = listAgentEntry{
-			Alias: entry.Alias,
-			URL:   entry.URL,
+			Alias:     entry.Alias,
+			URL:       entry.URL,
+			RateLimit: rateLimit,
 		}
 	}
 

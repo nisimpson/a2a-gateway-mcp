@@ -117,6 +117,13 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 		}, nil, nil
 	}
 
+	// Rate limit check for alias-based sends.
+	if resolved.IsAlias {
+		if result := s.checkRateLimit(resolved.Alias); result != nil {
+			return result, nil, nil
+		}
+	}
+
 	// Determine context_id priority: explicit > stored > empty (new conversation).
 	contextID := input.ContextID
 	if contextID == "" && resolved.IsAlias {

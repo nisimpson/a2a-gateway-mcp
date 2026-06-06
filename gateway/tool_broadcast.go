@@ -101,6 +101,14 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 		}
 	}
 
+	// Rate limit check for this agent.
+	if !s.rateLimiters.Allow(alias) {
+		return &broadcastResult{
+			Status: "error",
+			Error:  fmt.Sprintf("rate limited: agent %q has exceeded its rate limit", alias),
+		}
+	}
+
 	// Create per-agent timeout context.
 	agentCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()

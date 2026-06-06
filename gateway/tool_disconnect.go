@@ -31,6 +31,9 @@ func (s *Server) handleDisconnectAgent(_ context.Context, _ *mcp.CallToolRequest
 	// Evict cached SDK client so reconnection uses a fresh client.
 	s.clients.Evict(entry.URL)
 
+	// Remove rate limiter for this agent.
+	s.rateLimiters.Remove(input.Alias)
+
 	// Also delete context store entry.
 	s.contextStore.Delete(input.Alias)
 

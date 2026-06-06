@@ -6,6 +6,7 @@ require (
 	github.com/a2aproject/a2a-go/v2 v2.3.1
 	github.com/leanovate/gopter v0.2.11
 	github.com/modelcontextprotocol/go-sdk v1.6.1
+	golang.org/x/time v0.15.0
 )
 
 require (
