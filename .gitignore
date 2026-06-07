@@ -39,3 +39,4 @@ Thumbs.db
 .env.local
 
 docs/archive/specs/*
+docs/backlog/*
