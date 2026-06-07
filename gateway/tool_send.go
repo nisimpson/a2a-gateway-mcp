@@ -12,6 +12,87 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// extractResultText extracts the primary response text from a CallToolResult.
+// It returns the text from the first TextContent item, skipping metadata
+// prefixes (context_id:, task_id:, state:).
+func extractResultText(result *mcp.CallToolResult) string {
+	if result == nil {
+		return ""
+	}
+	var parts []string
+	for _, content := range result.Content {
+		tc, ok := content.(*mcp.TextContent)
+		if !ok {
+			continue
+		}
+		// Skip metadata content items.
+		if strings.HasPrefix(tc.Text, "context_id:") ||
+			strings.HasPrefix(tc.Text, "task_id:") ||
+			strings.HasPrefix(tc.Text, "state:") {
+			continue
+		}
+		parts = append(parts, tc.Text)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// extractResultContextID extracts the context_id from a CallToolResult's content items.
+func extractResultContextID(result *mcp.CallToolResult) string {
+	if result == nil {
+		return ""
+	}
+	for _, content := range result.Content {
+		tc, ok := content.(*mcp.TextContent)
+		if !ok {
+			continue
+		}
+		if v, found := strings.CutPrefix(tc.Text, "context_id:"); found {
+			return v
+		}
+	}
+	return ""
+}
+
+// extractResultTaskID extracts the task_id from a CallToolResult's content items.
+func extractResultTaskID(result *mcp.CallToolResult) string {
+	if result == nil {
+		return ""
+	}
+	for _, content := range result.Content {
+		tc, ok := content.(*mcp.TextContent)
+		if !ok {
+			continue
+		}
+		if v, found := strings.CutPrefix(tc.Text, "task_id:"); found {
+			return v
+		}
+	}
+	return ""
+}
+
+// sentMessageText returns the text representation of the sent message for history recording.
+// It uses the plain message field if available, otherwise renders the parts.
+func sentMessageText(input SendMessageInput) string {
+	if input.Message != "" {
+		return input.Message
+	}
+	// Build a summary from parts.
+	var parts []string
+	for _, p := range input.Parts {
+		switch {
+		case p.Text != nil:
+			parts = append(parts, *p.Text)
+		case p.Data != nil:
+			parts = append(parts, "[data]")
+		case p.URL != nil:
+			parts = append(parts, *p.URL)
+		case p.Raw != nil:
+			parts = append(parts, "[binary]")
+		}
+	}
+	return strings.Join(parts, "")
+}
+
 // buildMessageParts constructs a2a.ContentParts from the input message and parts.
 // Priority: parts > message. At least one must be provided.
 func buildMessageParts(message string, parts []InputPart) (a2a.ContentParts, error) {
@@ -159,32 +240,43 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 	if supportsStreaming(s.registry, resolved) {
 		result, err := s.handleStreamingMessage(ctx, req, a2aClient, sendReq, resolved, input.Agent, s.effectiveStreamTimeout(input.PollTimeoutSeconds))
 		if err != nil {
-			return handleA2AError(err), nil, nil
+			errResult := handleA2AError(err)
+			s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(errResult), extractResultContextID(errResult), extractResultTaskID(errResult), errResult.IsError)
+			return errResult, nil, nil
 		}
+		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(result), extractResultContextID(result), extractResultTaskID(result), result.IsError)
 		return result, nil, nil
 	}
 
 	// Call SDK client.
 	result, err := a2aClient.SendMessage(ctx, sendReq)
 	if err != nil {
-		return handleA2AError(err), nil, nil
+		errResult := handleA2AError(err)
+		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(errResult), extractResultContextID(errResult), extractResultTaskID(errResult), errResult.IsError)
+		return errResult, nil, nil
 	}
 
 	// Type switch on result.
 	switch v := result.(type) {
 	case *a2a.Task:
-		return s.handleTaskResult(ctx, a2aClient, v, resolved, input.Agent, s.effectivePollTimeout(input.PollTimeoutSeconds))
+		taskResult, meta, taskErr := s.handleTaskResult(ctx, a2aClient, v, resolved, input.Agent, s.effectivePollTimeout(input.PollTimeoutSeconds))
+		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(taskResult), extractResultContextID(taskResult), extractResultTaskID(taskResult), taskResult.IsError)
+		return taskResult, meta, taskErr
 	case *a2a.Message:
 		// Store context_id if alias-based.
 		if resolved.IsAlias && v.ContextID != "" {
 			s.contextStore.Set(input.Agent, v.ContextID)
 		}
-		return FormatMessageResponse(v), nil, nil
+		msgResult := FormatMessageResponse(v)
+		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(msgResult), extractResultContextID(msgResult), extractResultTaskID(msgResult), msgResult.IsError)
+		return msgResult, nil, nil
 	default:
-		return &mcp.CallToolResult{
+		defaultResult := &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{&mcp.TextContent{Text: "unrecognized response format: expected Task or Message"}},
-		}, nil, nil
+		}
+		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(defaultResult), extractResultContextID(defaultResult), extractResultTaskID(defaultResult), defaultResult.IsError)
+		return defaultResult, nil, nil
 	}
 }
 

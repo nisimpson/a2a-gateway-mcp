@@ -15,6 +15,22 @@ const (
 	defaultHTTPTimeout   = 30 * time.Second
 )
 
+// HistoryOptions configures the history subsystem. Pass to WithHistory().
+// Zero-value fields use sensible defaults.
+type HistoryOptions struct {
+	// Depth is the maximum number of entries per agent (default: 50).
+	// Set to 0 to disable history recording entirely.
+	Depth int
+
+	// MaxEntryLength is the maximum character length for message/response
+	// summaries (default: 1000). Longer text is truncated with "…".
+	MaxEntryLength int
+
+	// Backend is the storage implementation (default: in-memory).
+	// Must be safe for concurrent use.
+	Backend HistoryBackend
+}
+
 // Option configures the Gateway server at initialization time.
 type Option func(*serverConfig)
 
@@ -27,6 +43,12 @@ type serverConfig struct {
 	streamTimeout  time.Duration
 	rateLimitRPS   float64
 	rateLimitBurst int
+
+	// History configuration
+	historyConfigured bool // true when WithHistory was called
+	historyDepth      int
+	historyMaxEntry   int
+	historyBackend    HistoryBackend
 }
 
 // WithHTTPClient sets a custom http.Client for all outbound A2A requests.
@@ -78,6 +100,18 @@ func WithRateLimit(requestsPerSecond float64, burst int) Option {
 	}
 }
 
+// WithHistory configures the interaction history subsystem.
+// Zero-value fields in opts use defaults: depth=50, maxEntryLength=1000,
+// backend=MemoryBackend. To disable history entirely, set Depth to 0.
+func WithHistory(opts HistoryOptions) Option {
+	return func(cfg *serverConfig) {
+		cfg.historyConfigured = true
+		cfg.historyDepth = opts.Depth
+		cfg.historyMaxEntry = opts.MaxEntryLength
+		cfg.historyBackend = opts.Backend
+	}
+}
+
 // Server is the A2A Gateway MCP server. It wraps an mcp.Server and manages
 // the agent registry and context store.
 type Server struct {
@@ -97,6 +131,12 @@ type Server struct {
 	callerCard    *CallerCard // nil when no card is registered
 	callerCardKey string      // metadata key; empty means use default
 	callerCardMu  sync.RWMutex
+
+	// History subsystem — Requirements: 1.3, 6.3
+	historyBackend HistoryBackend
+	historyEnabled bool
+	historyDepth   int
+	maxEntryLength int
 }
 
 // NewServer creates a new gateway server with the given options.
@@ -136,6 +176,38 @@ func NewServer(opts ...Option) *Server {
 		}
 	}
 
+	// Configure history subsystem.
+	if cfg.historyConfigured {
+		// User explicitly called WithHistory.
+		if cfg.historyDepth == 0 {
+			// Depth=0 disables history entirely.
+			s.historyEnabled = false
+			s.historyDepth = 0
+			s.maxEntryLength = 0
+			s.historyBackend = nil
+		} else {
+			depth := cfg.historyDepth
+			maxEntry := cfg.historyMaxEntry
+			if maxEntry <= 0 {
+				maxEntry = 1000
+			}
+			backend := cfg.historyBackend
+			if backend == nil {
+				backend = NewMemoryBackend(depth)
+			}
+			s.historyEnabled = true
+			s.historyDepth = depth
+			s.maxEntryLength = maxEntry
+			s.historyBackend = backend
+		}
+	} else {
+		// No WithHistory call — apply defaults.
+		s.historyEnabled = true
+		s.historyDepth = 50
+		s.maxEntryLength = 1000
+		s.historyBackend = NewMemoryBackend(50)
+	}
+
 	s.clients = newClientResolver(s.registry, s.httpClient)
 
 	s.registerTools()
@@ -147,6 +219,11 @@ func NewServer(opts ...Option) *Server {
 // client disconnects or an error occurs.
 func (s *Server) Run(ctx context.Context) error {
 	transport := &mcp.StdioTransport{}
+	defer func() {
+		if s.historyEnabled && s.historyBackend != nil {
+			_ = s.historyBackend.Close(ctx)
+		}
+	}()
 	return s.mcpServer.Run(ctx, transport)
 }
 

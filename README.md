@@ -10,7 +10,7 @@ An MCP server that bridges the [Model Context Protocol](https://modelcontextprot
 
 a2a-gateway-mcp provides two main packages:
 
-- **`gateway`** — An MCP server library that exposes 12 tools for managing and communicating with A2A agents through an ephemeral, session-scoped registry. Includes per-agent rate limiting, automatic streaming transport, structured message parts, and caller agent card injection.
+- **`gateway`** — An MCP server library that exposes up to 14 tools for managing and communicating with A2A agents through an ephemeral, session-scoped registry. Includes per-agent rate limiting, automatic streaming transport, structured message parts, caller agent card injection, and per-agent interaction history.
 - **`directory`** — A server-side agent directory service that stores agent cards and serves them over HTTP, acting as the counterpart to the gateway's `discover_agents` tool.
 
 The project also ships a standalone CLI binary that runs the gateway on stdio transport, ready to plug into any MCP-compatible client.
@@ -83,7 +83,7 @@ func main() {
 
 ## MCP Tools
 
-The gateway exposes 12 tools to MCP clients:
+The gateway exposes up to 14 tools to MCP clients (12 core + 2 history tools when history is enabled):
 
 | Tool | Description |
 |------|-------------|
@@ -99,6 +99,8 @@ The gateway exposes 12 tools to MCP clients:
 | `create_caller_card` | Register a caller agent card for automatic outbound injection |
 | `view_caller_card` | View the currently registered caller agent card |
 | `remove_caller_card` | Remove the caller agent card |
+| `get_history` | Retrieve interaction history for a connected agent |
+| `clear_history` | Clear all interaction history for an agent without disconnecting |
 
 ### connect_agent
 
@@ -185,6 +187,31 @@ Register a caller agent card that gets automatically injected into all outbound 
 
 Calling again replaces the previous card. Use `view_caller_card` to inspect and `remove_caller_card` to clear.
 
+### get_history
+
+Retrieve the interaction history for a connected agent:
+
+```json
+{
+  "agent": "code-reviewer",
+  "limit": 10
+}
+```
+
+Returns a JSON array of history entries in chronological order (oldest first). Each entry includes the sent message summary, response summary, timestamp, context ID, task ID, and error flag. The optional `limit` parameter returns only the N most recent entries.
+
+### clear_history
+
+Clear all interaction history for an agent without disconnecting it:
+
+```json
+{
+  "agent": "code-reviewer"
+}
+```
+
+Returns a success confirmation. History for the agent is also automatically deleted when `disconnect_agent` is called.
+
 ## Agent Directory
 
 The `directory` package provides the server-side counterpart — an HTTP service that `discover_agents` connects to.
@@ -261,6 +288,7 @@ graph TD
         S[MCP Server - stdio transport]
         R[Agent Registry]
         CS[Context Store]
+        HS[History Backend]
         HC[HTTP Client]
     end
 
@@ -276,6 +304,7 @@ graph TD
     C <-->|JSON-RPC over stdio| S
     S --> R
     S --> CS
+    S --> HS
     S --> HC
     HC -->|HTTP + per-agent headers| A1
     HC -->|HTTP + per-agent headers| A2
@@ -301,6 +330,10 @@ gateway.NewServer(
     gateway.WithRateLimit(10.0, 20), // 10 req/s, burst of 20 (global default)
     gateway.WithPollTimeout(90*time.Second),
     gateway.WithStreamTimeout(90*time.Second),
+    gateway.WithHistory(gateway.HistoryOptions{
+        Depth:          100,  // max entries per agent (default: 50, 0 to disable)
+        MaxEntryLength: 2000, // max chars per text field (default: 1000)
+    }),
 )
 ```
 
@@ -316,6 +349,39 @@ srv := gateway.NewServer(gateway.WithRateLimit(10.0, 20))
 Per-agent overrides are set via the `connect_agent` tool's `rate_limit_rps` and `rate_limit_burst` parameters. Setting `rate_limit_rps` to zero disables rate limiting for that agent. When no global default is configured and no per-agent limit is set, throughput is unlimited (backward compatible).
 
 Rate-limited requests return an error with the agent alias and estimated wait time. In broadcasts, rate limits are evaluated independently per agent — some may succeed while others are rate-limited.
+
+### Interaction History
+
+The gateway automatically records interactions with each agent, enabling the MCP client to recall prior conversations without re-sending messages. History is enabled by default with a depth of 50 entries per agent.
+
+```go
+// Custom configuration
+srv := gateway.NewServer(gateway.WithHistory(gateway.HistoryOptions{
+    Depth:          100,  // max entries per agent
+    MaxEntryLength: 2000, // max characters per summary field
+}))
+
+// Disable history entirely
+srv := gateway.NewServer(gateway.WithHistory(gateway.HistoryOptions{Depth: 0}))
+
+// Custom storage backend
+srv := gateway.NewServer(gateway.WithHistory(gateway.HistoryOptions{
+    Backend: myRedisBackend, // must implement gateway.HistoryBackend
+}))
+```
+
+Built-in backends:
+- **MemoryBackend** (default) — In-process storage, lost on restart
+- **FileBackend** — Persists to one JSON file per agent in a configurable directory
+
+```go
+fileBackend, _ := gateway.NewFileBackend("/var/lib/a2a-history", 100)
+srv := gateway.NewServer(gateway.WithHistory(gateway.HistoryOptions{
+    Backend: fileBackend,
+}))
+```
+
+When history is disabled (depth=0), the `get_history` and `clear_history` tools are not exposed. History for an agent is automatically deleted on `disconnect_agent`.
 
 ## Development
 

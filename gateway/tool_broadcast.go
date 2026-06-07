@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,23 +91,49 @@ func (s *Server) handleBroadcastMessage(ctx context.Context, _ *mcp.CallToolRequ
 	}, nil, nil
 }
 
+// broadcastSentText returns the text representation of the sent message for history recording
+// in the broadcast context. It mirrors sentMessageText but works with broadcast parameters.
+func broadcastSentText(message string, parts []InputPart) string {
+	if message != "" {
+		return message
+	}
+	var segments []string
+	for _, p := range parts {
+		switch {
+		case p.Text != nil:
+			segments = append(segments, *p.Text)
+		case p.Data != nil:
+			segments = append(segments, "[data]")
+		case p.URL != nil:
+			segments = append(segments, *p.URL)
+		case p.Raw != nil:
+			segments = append(segments, "[binary]")
+		}
+	}
+	return strings.Join(segments, "")
+}
+
 // broadcastToAgent sends a message to a single agent and returns the result.
 func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, parts []InputPart, metadata map[string]any, timeoutSeconds int) *broadcastResult {
 	// Resolve alias from registry.
 	entry := s.registry.Lookup(alias)
 	if entry == nil {
-		return &broadcastResult{
+		result := &broadcastResult{
 			Status: "error",
 			Error:  fmt.Sprintf("alias %q is not registered", alias),
 		}
+		s.recordBroadcastHistory(ctx, alias, message, parts, result)
+		return result
 	}
 
 	// Rate limit check for this agent.
 	if !s.rateLimiters.Allow(alias) {
-		return &broadcastResult{
+		result := &broadcastResult{
 			Status: "error",
 			Error:  fmt.Sprintf("rate limited: agent %q has exceeded its rate limit", alias),
 		}
+		s.recordBroadcastHistory(ctx, alias, message, parts, result)
+		return result
 	}
 
 	// Create per-agent timeout context.
@@ -117,19 +144,23 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 	resolved := &ResolveResult{URL: entry.URL, IsAlias: true, Headers: entry.Headers, Alias: alias}
 	a2aClient, err := s.clients.Resolve(agentCtx, resolved)
 	if err != nil {
-		return &broadcastResult{
+		result := &broadcastResult{
 			Status: "error",
 			Error:  fmt.Sprintf("failed to resolve client: %v", err),
 		}
+		s.recordBroadcastHistory(ctx, alias, message, parts, result)
+		return result
 	}
 
 	// Build content parts from message/parts input.
 	contentParts, err := buildMessageParts(message, parts)
 	if err != nil {
-		return &broadcastResult{
+		result := &broadcastResult{
 			Status: "error",
 			Error:  err.Error(),
 		}
+		s.recordBroadcastHistory(ctx, alias, message, parts, result)
+		return result
 	}
 
 	// Build A2A message.
@@ -146,35 +177,56 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 
 	// Requirement: STRM-5.1, STRM-5.2 — use streaming when supported.
 	if supportsStreaming(s.registry, resolved) {
-		return s.broadcastToAgentStreaming(agentCtx, a2aClient, sendReq, resolved, alias, timeoutSeconds)
+		result := s.broadcastToAgentStreaming(agentCtx, a2aClient, sendReq, resolved, alias, timeoutSeconds)
+		s.recordBroadcastHistory(ctx, alias, message, parts, result)
+		return result
 	}
 
-	result, err := a2aClient.SendMessage(agentCtx, sendReq)
+	sendResult, err := a2aClient.SendMessage(agentCtx, sendReq)
 	if err != nil {
-		return &broadcastResult{
+		result := &broadcastResult{
 			Status: "error",
 			Error:  err.Error(),
 		}
+		s.recordBroadcastHistory(ctx, alias, message, parts, result)
+		return result
 	}
 
 	// Type switch on result.
-	switch v := result.(type) {
+	switch v := sendResult.(type) {
 	case *a2a.Message:
 		text := extractContentFromMessageParts(v.Parts)
-		return &broadcastResult{
+		result := &broadcastResult{
 			Status:   "success",
 			Response: text,
 		}
+		s.recordBroadcastHistory(ctx, alias, message, parts, result)
+		return result
 
 	case *a2a.Task:
-		return s.handleBroadcastTaskResult(v)
+		result := s.handleBroadcastTaskResult(v)
+		s.recordBroadcastHistory(ctx, alias, message, parts, result)
+		return result
 
 	default:
-		return &broadcastResult{
+		result := &broadcastResult{
 			Status: "error",
 			Error:  "unrecognized response format",
 		}
+		s.recordBroadcastHistory(ctx, alias, message, parts, result)
+		return result
 	}
+}
+
+// recordBroadcastHistory records a broadcast interaction to the history backend.
+func (s *Server) recordBroadcastHistory(ctx context.Context, alias, message string, parts []InputPart, result *broadcastResult) {
+	sent := broadcastSentText(message, parts)
+	response := result.Response
+	if response == "" && result.Error != "" {
+		response = result.Error
+	}
+	isError := result.Status == "error"
+	s.recordHistory(ctx, alias, sent, response, "", "", isError)
 }
 
 // broadcastToAgentStreaming sends a message using streaming and converts
