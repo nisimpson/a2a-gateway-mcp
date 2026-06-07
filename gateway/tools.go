@@ -191,4 +191,18 @@ Calling again replaces the previous card. This enables target agents to discover
 		Name:        "remove_caller_card",
 		Description: "Remove the registered caller agent card so it is no longer injected on outbound messages",
 	}, s.handleRemoveCallerCard)
+
+	// Register history tools only when history is enabled (depth > 0).
+	// Requirements: 5.1, 5.2, 5.3
+	if s.historyEnabled {
+		mcp.AddTool(s.mcpServer, &mcp.Tool{
+			Name:        "get_history",
+			Description: "Retrieve the interaction history for a connected agent. Returns a chronological list of past interactions including sent messages and responses.",
+		}, s.handleGetHistory)
+
+		mcp.AddTool(s.mcpServer, &mcp.Tool{
+			Name:        "clear_history",
+			Description: "Clear all interaction history for a connected agent without disconnecting the agent.",
+		}, s.handleClearHistory)
+	}
 }

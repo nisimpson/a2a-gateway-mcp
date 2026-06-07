@@ -8,7 +8,7 @@ import (
 )
 
 // handleDisconnectAgent removes a registered agent by alias from the gateway registry.
-func (s *Server) handleDisconnectAgent(_ context.Context, _ *mcp.CallToolRequest, input DisconnectAgentInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleDisconnectAgent(ctx context.Context, _ *mcp.CallToolRequest, input DisconnectAgentInput) (*mcp.CallToolResult, any, error) {
 	// Validate alias is non-empty.
 	if err := ValidateAlias(input.Alias); err != nil {
 		return &mcp.CallToolResult{
@@ -36,6 +36,11 @@ func (s *Server) handleDisconnectAgent(_ context.Context, _ *mcp.CallToolRequest
 
 	// Also delete context store entry.
 	s.contextStore.Delete(input.Alias)
+
+	// Delete interaction history for this agent.
+	if s.historyEnabled {
+		_ = s.historyBackend.Delete(ctx, input.Alias)
+	}
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{
