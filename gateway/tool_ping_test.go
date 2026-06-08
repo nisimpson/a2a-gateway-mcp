@@ -70,7 +70,6 @@ func TestPropertyPingAnyStatusResetsHealth(t *testing.T) {
 	properties.TestingRun(t)
 }
 
-
 // recordingPingStrategy is a test double for PingStrategy that returns a
 // configurable PingResult and records the PingTarget and context for assertions.
 type recordingPingStrategy struct {

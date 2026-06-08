@@ -131,7 +131,7 @@ func genCategorizedError() gopter.Gen {
 	return func(params *gopter.GenParameters) *gopter.GenResult {
 		// Select a category randomly from the full set
 		categories := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-		idx := int(params.NextInt64()%int64(len(categories)))
+		idx := int(params.NextInt64() % int64(len(categories)))
 		if idx < 0 {
 			idx = -idx
 		}
@@ -182,7 +182,7 @@ func genCategorizedError() gopter.Gen {
 		case 4:
 			// net.OpError (connection refused) → OutcomeConnectionError
 			ops := []string{"dial", "read", "write"}
-			opIdx := int(params.NextInt64()%int64(len(ops)))
+			opIdx := int(params.NextInt64() % int64(len(ops)))
 			if opIdx < 0 {
 				opIdx = -opIdx
 			}
@@ -246,7 +246,7 @@ func genCategorizedError() gopter.Gen {
 				"unexpected protocol error",
 				"remote closed stream",
 			}
-			msgIdx := int(params.NextInt64()%int64(len(msgs)))
+			msgIdx := int(params.NextInt64() % int64(len(msgs)))
 			if msgIdx < 0 {
 				msgIdx = -msgIdx
 			}

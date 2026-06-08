@@ -87,7 +87,7 @@ func TestDefaultPingStrategy_AppliesHeaders(t *testing.T) {
 		Alias: "test-agent",
 		URL:   server.URL,
 		Headers: map[string]string{
-			"Authorization":  "Bearer my-token",
+			"Authorization":   "Bearer my-token",
 			"X-Custom-Header": "custom-value",
 		},
 	}
