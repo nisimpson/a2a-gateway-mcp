@@ -31,7 +31,7 @@ func TestGetAgentCard_AliasResolution(t *testing.T) {
 	defer ts.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("my-agent", ts.URL, map[string]string{"X-Api-Key": "secret"})
+	srv.registry.Connect("my-agent", ts.URL, map[string]string{"X-Api-Key": "secret"}, "")
 
 	session := connectTestClient(t, srv.mcpServer)
 	defer session.Close()
@@ -77,7 +77,7 @@ func TestGetAgentCard_AliasResolution_HeadersApplied(t *testing.T) {
 	defer ts.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("my-agent", ts.URL, map[string]string{"X-Api-Key": "my-secret-key"})
+	srv.registry.Connect("my-agent", ts.URL, map[string]string{"X-Api-Key": "my-secret-key"}, "")
 
 	session := connectTestClient(t, srv.mcpServer)
 	defer session.Close()
@@ -290,7 +290,7 @@ func TestGetAgentCard_URLBasedNoHeaders(t *testing.T) {
 
 	srv := NewServer()
 	// Register an agent with the same URL and custom headers.
-	srv.registry.Connect("same-url-agent", ts.URL, map[string]string{"X-Secret": "should-not-appear"})
+	srv.registry.Connect("same-url-agent", ts.URL, map[string]string{"X-Secret": "should-not-appear"}, "")
 
 	session := connectTestClient(t, srv.mcpServer)
 	defer session.Close()

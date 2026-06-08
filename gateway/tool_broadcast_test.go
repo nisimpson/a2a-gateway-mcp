@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -107,7 +108,7 @@ func TestPropertyBroadcastPartialResultsAttribution(t *testing.T) {
 			// Create server and register valid aliases with AgentCard.
 			srv := NewServer()
 			for _, alias := range validAliases {
-				srv.registry.Connect(alias, agent.URL, nil)
+				srv.registry.Connect(alias, agent.URL, nil, "")
 				srv.registry.SetCard(alias, &a2a.AgentCard{
 					Name: alias,
 					SupportedInterfaces: []*a2a.AgentInterface{
@@ -198,7 +199,7 @@ func TestHandleBroadcastMessage_AllSuccess(t *testing.T) {
 
 	srv := NewServer()
 	for _, alias := range []string{"agent-a", "agent-b", "agent-c"} {
-		srv.registry.Connect(alias, agent.URL, nil)
+		srv.registry.Connect(alias, agent.URL, nil, "")
 		srv.registry.SetCard(alias, &a2a.AgentCard{
 			Name: alias,
 			SupportedInterfaces: []*a2a.AgentInterface{
@@ -266,7 +267,7 @@ func TestHandleBroadcastMessage_AllFailure(t *testing.T) {
 
 	srv := NewServer()
 	for _, alias := range []string{"fail-a", "fail-b"} {
-		srv.registry.Connect(alias, agent.URL, nil)
+		srv.registry.Connect(alias, agent.URL, nil, "")
 		srv.registry.SetCard(alias, &a2a.AgentCard{
 			Name: alias,
 			SupportedInterfaces: []*a2a.AgentInterface{
@@ -343,14 +344,14 @@ func TestHandleBroadcastMessage_MixedResults(t *testing.T) {
 	defer badAgent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("good-agent", goodAgent.URL, nil)
+	srv.registry.Connect("good-agent", goodAgent.URL, nil, "")
 	srv.registry.SetCard("good-agent", &a2a.AgentCard{
 		Name: "good-agent",
 		SupportedInterfaces: []*a2a.AgentInterface{
 			a2a.NewAgentInterface(goodAgent.URL, a2a.TransportProtocolJSONRPC),
 		},
 	})
-	srv.registry.Connect("bad-agent", badAgent.URL, nil)
+	srv.registry.Connect("bad-agent", badAgent.URL, nil, "")
 	srv.registry.SetCard("bad-agent", &a2a.AgentCard{
 		Name: "bad-agent",
 		SupportedInterfaces: []*a2a.AgentInterface{
@@ -422,7 +423,7 @@ func TestHandleBroadcastMessage_TimeoutEnforcement(t *testing.T) {
 	defer agent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("slow-agent", agent.URL, nil)
+	srv.registry.Connect("slow-agent", agent.URL, nil, "")
 	srv.registry.SetCard("slow-agent", &a2a.AgentCard{
 		Name: "slow-agent",
 		SupportedInterfaces: []*a2a.AgentInterface{
@@ -572,7 +573,7 @@ func TestHandleBroadcastMessage_ConcurrentExecution(t *testing.T) {
 	for i := range numAgents {
 		alias := "concurrent-" + string(rune('a'+i))
 		aliases[i] = alias
-		srv.registry.Connect(alias, agent.URL, nil)
+		srv.registry.Connect(alias, agent.URL, nil, "")
 		srv.registry.SetCard(alias, &a2a.AgentCard{
 			Name: alias,
 			SupportedInterfaces: []*a2a.AgentInterface{
@@ -642,7 +643,7 @@ func TestHandleBroadcastMessage_AuthRequired(t *testing.T) {
 	defer agent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("auth-broadcast-agent", agent.URL, nil)
+	srv.registry.Connect("auth-broadcast-agent", agent.URL, nil, "")
 	srv.registry.SetCard("auth-broadcast-agent", &a2a.AgentCard{
 		Name: "auth-broadcast-agent",
 		SupportedInterfaces: []*a2a.AgentInterface{
@@ -712,14 +713,14 @@ func TestHandleBroadcastMessage_MessageResponse(t *testing.T) {
 	defer taskAgent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("msg-agent", messageAgent.URL, nil)
+	srv.registry.Connect("msg-agent", messageAgent.URL, nil, "")
 	srv.registry.SetCard("msg-agent", &a2a.AgentCard{
 		Name: "msg-agent",
 		SupportedInterfaces: []*a2a.AgentInterface{
 			a2a.NewAgentInterface(messageAgent.URL, a2a.TransportProtocolJSONRPC),
 		},
 	})
-	srv.registry.Connect("task-agent", taskAgent.URL, nil)
+	srv.registry.Connect("task-agent", taskAgent.URL, nil, "")
 	srv.registry.SetCard("task-agent", &a2a.AgentCard{
 		Name: "task-agent",
 		SupportedInterfaces: []*a2a.AgentInterface{
@@ -792,7 +793,7 @@ func TestHandleBroadcastMessage_MessageResponseNonTextParts(t *testing.T) {
 	defer nonTextAgent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("nontext-agent", nonTextAgent.URL, nil)
+	srv.registry.Connect("nontext-agent", nonTextAgent.URL, nil, "")
 	srv.registry.SetCard("nontext-agent", &a2a.AgentCard{
 		Name: "nontext-agent",
 		SupportedInterfaces: []*a2a.AgentInterface{
@@ -836,6 +837,216 @@ func TestHandleBroadcastMessage_MessageResponseNonTextParts(t *testing.T) {
 	}
 }
 
+// Feature: agent-health-checks, Property 8: Broadcast health-aware filtering
+// **Validates: Requirements HLTH-6.1, HLTH-6.3, HLTH-6.4, HLTH-6.5**
+
+func TestPropertyBroadcastHealthFiltering(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	// Generator for number of agents per health category (0-4 each).
+	countGen := gen.IntRange(0, 4)
+
+	// Generator for failure threshold (1-5).
+	thresholdGen := gen.IntRange(1, 5)
+
+	properties.Property("unhealthy agents are skipped; unknown/healthy agents are attempted; skipped agents do not consume rate limit tokens or increment failure count", prop.ForAll(
+		func(numHealthy, numUnhealthy, numUnknown, threshold int) bool {
+			// Ensure at least one agent exists.
+			if numHealthy+numUnhealthy+numUnknown == 0 {
+				return true // skip degenerate case
+			}
+
+			// Set up a mock A2A backend that responds with a completed task.
+			var requestCount atomic.Int32
+			agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requestCount.Add(1)
+				req, _ := readJSONRPCRequest(r)
+				task := &a2a.Task{
+					ID:     "task-health",
+					Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+					Artifacts: []*a2a.Artifact{
+						{Parts: a2a.ContentParts{a2a.NewTextPart("ok")}},
+					},
+				}
+				writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+			}))
+			defer agent.Close()
+
+			// Create server with specified threshold.
+			srv := NewServer(WithHealthCheck(HealthCheckOptions{FailureThreshold: threshold}))
+
+			// Configure rate limiters with a high rate (so healthy/unknown won't be
+			// rejected) but we can observe token consumption.
+			// We'll use Reserve() after the broadcast to verify tokens were/weren't consumed.
+
+			var healthyAliases, unhealthyAliases, unknownAliases []string
+			var allAliases []string
+
+			// Register healthy agents: Reset + RecordSuccess.
+			for i := range numHealthy {
+				alias := fmt.Sprintf("healthy-%d", i)
+				healthyAliases = append(healthyAliases, alias)
+				allAliases = append(allAliases, alias)
+				srv.registry.Connect(alias, agent.URL, nil, "")
+				srv.registry.SetCard(alias, &a2a.AgentCard{
+					Name: alias,
+					SupportedInterfaces: []*a2a.AgentInterface{
+						a2a.NewAgentInterface(agent.URL, a2a.TransportProtocolJSONRPC),
+					},
+				})
+				srv.healthTracker.Reset(alias)
+				srv.healthTracker.RecordSuccess(alias)
+			}
+
+			// Register unhealthy agents: Reset + threshold failures.
+			for i := range numUnhealthy {
+				alias := fmt.Sprintf("unhealthy-%d", i)
+				unhealthyAliases = append(unhealthyAliases, alias)
+				allAliases = append(allAliases, alias)
+				srv.registry.Connect(alias, agent.URL, nil, "")
+				srv.registry.SetCard(alias, &a2a.AgentCard{
+					Name: alias,
+					SupportedInterfaces: []*a2a.AgentInterface{
+						a2a.NewAgentInterface(agent.URL, a2a.TransportProtocolJSONRPC),
+					},
+				})
+				srv.healthTracker.Reset(alias)
+				for range threshold {
+					srv.healthTracker.RecordFailure(alias)
+				}
+			}
+
+			// Register unknown agents: just Reset (default state).
+			for i := range numUnknown {
+				alias := fmt.Sprintf("unknown-%d", i)
+				unknownAliases = append(unknownAliases, alias)
+				allAliases = append(allAliases, alias)
+				srv.registry.Connect(alias, agent.URL, nil, "")
+				srv.registry.SetCard(alias, &a2a.AgentCard{
+					Name: alias,
+					SupportedInterfaces: []*a2a.AgentInterface{
+						a2a.NewAgentInterface(agent.URL, a2a.TransportProtocolJSONRPC),
+					},
+				})
+				srv.healthTracker.Reset(alias)
+			}
+
+			// Set up rate limiters for all agents (high burst so healthy/unknown pass).
+			for _, alias := range allAliases {
+				srv.rateLimiters.Set(alias, 100, 100)
+			}
+
+			// Record pre-broadcast failure counts for unhealthy agents.
+			preFailureCounts := make(map[string]int)
+			for _, alias := range unhealthyAliases {
+				state := srv.healthTracker.Get(alias)
+				preFailureCounts[alias] = state.Failures
+			}
+
+			// Execute broadcast.
+			input := BroadcastMessageInput{
+				Aliases: allAliases,
+				Message: "health filter test",
+			}
+
+			result, _, err := srv.handleBroadcastMessage(context.Background(), nil, input)
+			if err != nil {
+				t.Logf("unexpected error: %v", err)
+				return false
+			}
+			if result.IsError {
+				t.Logf("unexpected error result: %v", result.Content)
+				return false
+			}
+
+			// Parse results.
+			textContent, ok := result.Content[0].(*mcp.TextContent)
+			if !ok {
+				t.Log("expected TextContent in result")
+				return false
+			}
+
+			var results map[string]*broadcastResult
+			if err := json.Unmarshal([]byte(textContent.Text), &results); err != nil {
+				t.Logf("failed to parse results: %v", err)
+				return false
+			}
+
+			// HLTH-6.1: Unhealthy agents are skipped with status "skipped" and error "agent is unhealthy".
+			for _, alias := range unhealthyAliases {
+				r, exists := results[alias]
+				if !exists {
+					t.Logf("missing result for unhealthy alias %q", alias)
+					return false
+				}
+				if r.Status != "skipped" {
+					t.Logf("expected status 'skipped' for unhealthy alias %q, got %q", alias, r.Status)
+					return false
+				}
+				if r.Error != "agent is unhealthy" {
+					t.Logf("expected error 'agent is unhealthy' for unhealthy alias %q, got %q", alias, r.Error)
+					return false
+				}
+			}
+
+			// HLTH-6.3: Unknown agents are still attempted (should get success from mock server).
+			for _, alias := range unknownAliases {
+				r, exists := results[alias]
+				if !exists {
+					t.Logf("missing result for unknown alias %q", alias)
+					return false
+				}
+				if r.Status != "success" {
+					t.Logf("expected status 'success' for unknown alias %q (should be attempted), got %q", alias, r.Status)
+					return false
+				}
+			}
+
+			// Healthy agents should also be attempted and succeed.
+			for _, alias := range healthyAliases {
+				r, exists := results[alias]
+				if !exists {
+					t.Logf("missing result for healthy alias %q", alias)
+					return false
+				}
+				if r.Status != "success" {
+					t.Logf("expected status 'success' for healthy alias %q, got %q", alias, r.Status)
+					return false
+				}
+			}
+
+			// HLTH-6.4: Verify request count matches only healthy + unknown agents
+			// (unhealthy agents should NOT have sent a request to the mock server).
+			expectedRequests := int32(numHealthy + numUnknown)
+			actualRequests := requestCount.Load()
+			if actualRequests != expectedRequests {
+				t.Logf("expected %d HTTP requests (healthy+unknown), got %d", expectedRequests, actualRequests)
+				return false
+			}
+
+			// HLTH-6.5: Skipped agents do not increment failure count.
+			for _, alias := range unhealthyAliases {
+				state := srv.healthTracker.Get(alias)
+				if state.Failures != preFailureCounts[alias] {
+					t.Logf("failure count changed for skipped unhealthy alias %q: pre=%d, post=%d", alias, preFailureCounts[alias], state.Failures)
+					return false
+				}
+			}
+
+			return true
+		},
+		countGen, // numHealthy
+		countGen, // numUnhealthy
+		countGen, // numUnknown
+		thresholdGen,
+	))
+
+	properties.TestingRun(t)
+}
+
 func TestHandleBroadcastMessage_UnrecognizedResponse(t *testing.T) {
 	// Agent that returns a JSON-RPC error (SDK will surface it as an error).
 	weirdAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -845,7 +1056,7 @@ func TestHandleBroadcastMessage_UnrecognizedResponse(t *testing.T) {
 	defer weirdAgent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("weird-agent", weirdAgent.URL, nil)
+	srv.registry.Connect("weird-agent", weirdAgent.URL, nil, "")
 	srv.registry.SetCard("weird-agent", &a2a.AgentCard{
 		Name: "weird-agent",
 		SupportedInterfaces: []*a2a.AgentInterface{

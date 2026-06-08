@@ -20,7 +20,7 @@ import (
 // has Streaming=true in its card. The card also sets up a JSON-RPC interface.
 func newTestServerWithStreamingAgent(alias, agentURL string) *Server {
 	srv := NewServer()
-	srv.registry.Connect(alias, agentURL, nil)
+	srv.registry.Connect(alias, agentURL, nil, "")
 	srv.registry.SetCard(alias, &a2a.AgentCard{
 		Name:         alias,
 		Capabilities: a2a.AgentCapabilities{Streaming: true},

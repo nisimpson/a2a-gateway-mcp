@@ -18,7 +18,7 @@ func TestClientResolver_Evict_RemovesCachedClient(t *testing.T) {
 	defer agent.Close()
 
 	registry := NewAgentRegistry()
-	registry.Connect("test-agent", agent.URL, nil)
+	registry.Connect("test-agent", agent.URL, nil, "")
 	registry.SetCard("test-agent", &a2a.AgentCard{
 		Name: "test-agent",
 		SupportedInterfaces: []*a2a.AgentInterface{
@@ -455,7 +455,7 @@ func TestCreateClient_JSONRPCCard_SendsJSONRPCFormat(t *testing.T) {
 	defer agent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("jsonrpc-test", agent.URL, nil)
+	srv.registry.Connect("jsonrpc-test", agent.URL, nil, "")
 	srv.registry.SetCard("jsonrpc-test", &a2a.AgentCard{
 		Name: "jsonrpc-test",
 		SupportedInterfaces: []*a2a.AgentInterface{

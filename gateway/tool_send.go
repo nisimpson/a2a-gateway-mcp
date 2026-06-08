@@ -240,9 +240,21 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 	if supportsStreaming(s.registry, resolved) {
 		result, err := s.handleStreamingMessage(ctx, req, a2aClient, sendReq, resolved, input.Agent, s.effectiveStreamTimeout(input.PollTimeoutSeconds))
 		if err != nil {
+			// Requirement: HLTH-1.1, HLTH-8.3 — record health based on error classification.
+			if resolved.IsAlias {
+				outcome := ClassifyError(err)
+				if outcome == OutcomeConnectionError {
+					s.healthTracker.RecordFailure(resolved.Alias)
+				}
+				// On OutcomeContextCanceled: do not update health state (HLTH-8.3).
+			}
 			errResult := handleA2AError(err)
 			s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(errResult), extractResultContextID(errResult), extractResultTaskID(errResult), errResult.IsError)
 			return errResult, nil, nil
+		}
+		// Requirement: HLTH-1.2 — record success on any HTTP response.
+		if resolved.IsAlias {
+			s.healthTracker.RecordSuccess(resolved.Alias)
 		}
 		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(result), extractResultContextID(result), extractResultTaskID(result), result.IsError)
 		return result, nil, nil
@@ -251,9 +263,22 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 	// Call SDK client.
 	result, err := a2aClient.SendMessage(ctx, sendReq)
 	if err != nil {
+		// Requirement: HLTH-1.1, HLTH-8.3 — record health based on error classification.
+		if resolved.IsAlias {
+			outcome := ClassifyError(err)
+			if outcome == OutcomeConnectionError {
+				s.healthTracker.RecordFailure(resolved.Alias)
+			}
+			// On OutcomeContextCanceled: do not update health state (HLTH-8.3).
+		}
 		errResult := handleA2AError(err)
 		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(errResult), extractResultContextID(errResult), extractResultTaskID(errResult), errResult.IsError)
 		return errResult, nil, nil
+	}
+
+	// Requirement: HLTH-1.2 — record success on any HTTP response.
+	if resolved.IsAlias {
+		s.healthTracker.RecordSuccess(resolved.Alias)
 	}
 
 	// Type switch on result.

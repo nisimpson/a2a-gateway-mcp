@@ -43,7 +43,7 @@ func TestPropertyTransportSelectionCorrectness(t *testing.T) {
 			registry := NewAgentRegistry()
 
 			// Register the agent entry
-			registry.Connect(alias, url, nil)
+			registry.Connect(alias, url, nil, "")
 
 			// Set up card based on test parameters
 			if hasCard {
@@ -79,7 +79,7 @@ func TestPropertyTransportSelectionCorrectness(t *testing.T) {
 	properties.Property("URL-based resolution always returns false", prop.ForAll(
 		func(alias string, url string, streaming bool) bool {
 			registry := NewAgentRegistry()
-			registry.Connect(alias, url, nil)
+			registry.Connect(alias, url, nil, "")
 			registry.SetCard(alias, &a2a.AgentCard{
 				Name:         alias,
 				Capabilities: a2a.AgentCapabilities{Streaming: streaming},
@@ -104,7 +104,7 @@ func TestPropertyTransportSelectionCorrectness(t *testing.T) {
 		func(alias string, otherAlias string, url string) bool {
 			registry := NewAgentRegistry()
 			// Register a different alias
-			registry.Connect(otherAlias, url, nil)
+			registry.Connect(otherAlias, url, nil, "")
 			registry.SetCard(otherAlias, &a2a.AgentCard{
 				Name:         otherAlias,
 				Capabilities: a2a.AgentCapabilities{Streaming: true},
@@ -624,7 +624,7 @@ func TestPropertyContextIDStorage(t *testing.T) {
 				contextStore: NewContextStore(),
 				registry:     NewAgentRegistry(),
 			}
-			server.registry.Connect(alias, "https://example.com", nil)
+			server.registry.Connect(alias, "https://example.com", nil, "")
 
 			// Build an event stream with the given contextID based on terminal type.
 			var events []eventOrError
@@ -1202,7 +1202,7 @@ func TestPropertyProgressNotificationEmission(t *testing.T) {
 
 func TestSupportsStreaming_AliasBased_StreamingTrue(t *testing.T) {
 	registry := NewAgentRegistry()
-	registry.Connect("stream-agent", "https://example.com", nil)
+	registry.Connect("stream-agent", "https://example.com", nil, "")
 	registry.SetCard("stream-agent", &a2a.AgentCard{
 		Name:         "stream-agent",
 		Capabilities: a2a.AgentCapabilities{Streaming: true},
@@ -1216,7 +1216,7 @@ func TestSupportsStreaming_AliasBased_StreamingTrue(t *testing.T) {
 
 func TestSupportsStreaming_AliasBased_StreamingFalse(t *testing.T) {
 	registry := NewAgentRegistry()
-	registry.Connect("poll-agent", "https://example.com", nil)
+	registry.Connect("poll-agent", "https://example.com", nil, "")
 	registry.SetCard("poll-agent", &a2a.AgentCard{
 		Name:         "poll-agent",
 		Capabilities: a2a.AgentCapabilities{Streaming: false},
@@ -1230,7 +1230,7 @@ func TestSupportsStreaming_AliasBased_StreamingFalse(t *testing.T) {
 
 func TestSupportsStreaming_NoCardStored(t *testing.T) {
 	registry := NewAgentRegistry()
-	registry.Connect("no-card-agent", "https://example.com", nil)
+	registry.Connect("no-card-agent", "https://example.com", nil, "")
 	// No SetCard call — entry.Card is nil
 
 	resolved := &ResolveResult{IsAlias: true, Alias: "no-card-agent", URL: "https://example.com"}
@@ -1242,7 +1242,7 @@ func TestSupportsStreaming_NoCardStored(t *testing.T) {
 func TestSupportsStreaming_URLBased(t *testing.T) {
 	registry := NewAgentRegistry()
 	// Even register the agent with streaming=true, but resolve as URL-based
-	registry.Connect("any-agent", "https://example.com", nil)
+	registry.Connect("any-agent", "https://example.com", nil, "")
 	registry.SetCard("any-agent", &a2a.AgentCard{
 		Name:         "any-agent",
 		Capabilities: a2a.AgentCapabilities{Streaming: true},
@@ -1256,7 +1256,7 @@ func TestSupportsStreaming_URLBased(t *testing.T) {
 
 func TestSupportsStreaming_DynamicCardUpdate(t *testing.T) {
 	registry := NewAgentRegistry()
-	registry.Connect("dynamic-agent", "https://example.com", nil)
+	registry.Connect("dynamic-agent", "https://example.com", nil, "")
 	registry.SetCard("dynamic-agent", &a2a.AgentCard{
 		Name:         "dynamic-agent",
 		Capabilities: a2a.AgentCapabilities{Streaming: false},

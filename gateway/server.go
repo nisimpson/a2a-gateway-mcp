@@ -15,6 +15,18 @@ const (
 	defaultHTTPTimeout   = 30 * time.Second
 )
 
+// HealthCheckOptions configures the health tracking subsystem.
+type HealthCheckOptions struct {
+	// FailureThreshold is the number of consecutive failures before marking
+	// an agent unhealthy. Default: 3. Zero disables tracking.
+	FailureThreshold int
+
+	// PingStrategy is the strategy used for on-demand liveness checks via
+	// the ping_agent tool. If nil, DefaultPingStrategy (HTTP GET to agent
+	// card endpoint) is used.
+	PingStrategy PingStrategy
+}
+
 // HistoryOptions configures the history subsystem. Pass to WithHistory().
 // Zero-value fields use sensible defaults.
 type HistoryOptions struct {
@@ -43,6 +55,11 @@ type serverConfig struct {
 	streamTimeout  time.Duration
 	rateLimitRPS   float64
 	rateLimitBurst int
+
+	// Health check configuration
+	healthCheckConfigured  bool // true when WithHealthCheck was called
+	healthFailureThreshold int
+	healthPingStrategy     PingStrategy
 
 	// History configuration
 	historyConfigured bool // true when WithHistory was called
@@ -112,6 +129,16 @@ func WithHistory(opts HistoryOptions) Option {
 	}
 }
 
+// WithHealthCheck configures health tracking. A threshold of 0 or negative
+// disables health tracking entirely.
+func WithHealthCheck(opts HealthCheckOptions) Option {
+	return func(cfg *serverConfig) {
+		cfg.healthCheckConfigured = true
+		cfg.healthFailureThreshold = opts.FailureThreshold
+		cfg.healthPingStrategy = opts.PingStrategy
+	}
+}
+
 // Server is the A2A Gateway MCP server. It wraps an mcp.Server and manages
 // the agent registry and context store.
 type Server struct {
@@ -137,6 +164,10 @@ type Server struct {
 	historyEnabled bool
 	historyDepth   int
 	maxEntryLength int
+
+	// Health tracking — Requirements: HLTH-4.1, HLTH-4.2, HLTH-4.3, HLTH-4.4, HLTH-4.5
+	healthTracker *HealthTracker
+	pingStrategy  PingStrategy
 }
 
 // NewServer creates a new gateway server with the given options.
@@ -209,6 +240,21 @@ func NewServer(opts ...Option) *Server {
 	}
 
 	s.clients = newClientResolver(s.registry, s.httpClient)
+
+	// Configure health tracking subsystem — Requirements: HLTH-4.1, HLTH-4.3, HLTH-4.4
+	threshold := 3
+	if cfg.healthCheckConfigured {
+		threshold = max(cfg.healthFailureThreshold, 0)
+	}
+	s.healthTracker = NewHealthTracker(threshold)
+
+	// Configure ping strategy (default: HTTP GET to agent card endpoint).
+	// Uses the server's existing HTTP client — no new client allocation.
+	if cfg.healthPingStrategy != nil {
+		s.pingStrategy = cfg.healthPingStrategy
+	} else {
+		s.pingStrategy = NewDefaultPingStrategy(s.httpClient)
+	}
 
 	s.registerTools()
 

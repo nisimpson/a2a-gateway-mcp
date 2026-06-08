@@ -125,7 +125,7 @@ func TestHandleCancelTask_TaskNotFound(t *testing.T) {
 func TestHandleCancelTask_UnreachableAgent(t *testing.T) {
 	srv := NewServer()
 	// Register an agent pointing to a non-existent server.
-	srv.registry.Connect("dead-cancel-agent", "http://127.0.0.1:1", nil)
+	srv.registry.Connect("dead-cancel-agent", "http://127.0.0.1:1", nil, "")
 
 	input := CancelTaskInput{
 		Agent:  "dead-cancel-agent",

@@ -9,10 +9,11 @@ import (
 
 // AgentEntry represents a registered agent in the registry.
 type AgentEntry struct {
-	Alias   string
-	URL     string
-	Headers map[string]string
-	Card    *a2a.AgentCard // nil if fetch failed or not attempted
+	Alias        string
+	URL          string
+	Headers      map[string]string
+	Card         *a2a.AgentCard // nil if fetch failed or not attempted
+	PingEndpoint string         // optional, relative path starting with "/"
 }
 
 // AgentRegistry is a thread-safe, in-memory map of aliases to agent entries.
@@ -30,15 +31,17 @@ func NewAgentRegistry() *AgentRegistry {
 
 // Connect adds or updates an agent entry. Returns true if the entry was
 // updated (alias already existed), false if it was newly added.
-func (r *AgentRegistry) Connect(alias, url string, headers map[string]string) (updated bool) {
+// The pingEndpoint is optional — an empty string means "use default endpoint (.well-known/agent.json)".
+func (r *AgentRegistry) Connect(alias, url string, headers map[string]string, pingEndpoint string) (updated bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	_, updated = r.entries[alias]
 	r.entries[alias] = &AgentEntry{
-		Alias:   alias,
-		URL:     url,
-		Headers: headers,
+		Alias:        alias,
+		URL:          url,
+		Headers:      headers,
+		PingEndpoint: pingEndpoint,
 	}
 	return updated
 }

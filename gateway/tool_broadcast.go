@@ -126,6 +126,18 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 		return result
 	}
 
+	// Health check BEFORE rate limit — skip unhealthy agents without consuming
+	// a rate limit token (HLTH-6.1, HLTH-6.4). Agents with status "unknown" are
+	// still attempted (HLTH-6.3).
+	if s.healthTracker.IsEnabled() {
+		state := s.healthTracker.Get(alias)
+		if state.Status == HealthStatusUnhealthy {
+			result := &broadcastResult{Status: "skipped", Error: "agent is unhealthy"}
+			s.recordBroadcastHistory(ctx, alias, message, parts, result)
+			return result
+		}
+	}
+
 	// Rate limit check for this agent.
 	if !s.rateLimiters.Allow(alias) {
 		result := &broadcastResult{
@@ -177,13 +189,22 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 
 	// Requirement: STRM-5.1, STRM-5.2 — use streaming when supported.
 	if supportsStreaming(s.registry, resolved) {
-		result := s.broadcastToAgentStreaming(agentCtx, a2aClient, sendReq, resolved, alias, timeoutSeconds)
+		result, reachable := s.broadcastToAgentStreaming(agentCtx, a2aClient, sendReq, resolved, alias, timeoutSeconds)
+		// Record health outcome for streaming path.
+		if reachable {
+			s.healthTracker.RecordSuccess(alias)
+		} else {
+			// Transport-level failure — classify and record.
+			s.recordBroadcastHealthOutcome(agentCtx, alias, fmt.Errorf("%s", result.Error))
+		}
 		s.recordBroadcastHistory(ctx, alias, message, parts, result)
 		return result
 	}
 
 	sendResult, err := a2aClient.SendMessage(agentCtx, sendReq)
 	if err != nil {
+		// Record health outcome for connection errors.
+		s.recordBroadcastHealthOutcome(agentCtx, alias, err)
 		result := &broadcastResult{
 			Status: "error",
 			Error:  err.Error(),
@@ -191,6 +212,9 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 		s.recordBroadcastHistory(ctx, alias, message, parts, result)
 		return result
 	}
+
+	// Successful HTTP response — record success.
+	s.healthTracker.RecordSuccess(alias)
 
 	// Type switch on result.
 	switch v := sendResult.(type) {
@@ -225,13 +249,32 @@ func (s *Server) recordBroadcastHistory(ctx context.Context, alias, message stri
 	if response == "" && result.Error != "" {
 		response = result.Error
 	}
-	isError := result.Status == "error"
+	// HLTH-6.6: skipped agents are recorded with the same semantics as an error result.
+	isError := result.Status == "error" || result.Status == "skipped"
 	s.recordHistory(ctx, alias, sent, response, "", "", isError)
+}
+
+// recordBroadcastHealthOutcome classifies an error and records the appropriate
+// health outcome. Connection errors trigger RecordFailure; context cancellations
+// are ignored (HLTH-8.3).
+func (s *Server) recordBroadcastHealthOutcome(_ context.Context, alias string, err error) {
+	outcome := ClassifyError(err)
+	switch outcome {
+	case OutcomeConnectionError:
+		s.healthTracker.RecordFailure(alias)
+	case OutcomeSuccess:
+		s.healthTracker.RecordSuccess(alias)
+	case OutcomeContextCanceled:
+		// Do not update health state for client-initiated cancellations.
+	}
 }
 
 // broadcastToAgentStreaming sends a message using streaming and converts
 // the result to a broadcastResult with the same shape as non-streaming.
 // Requirements: STRM-5.1, STRM-5.3, STRM-5.4
+// The second return value indicates whether the agent was reachable:
+// true means a response was received (even if the task failed),
+// false means a transport-level error prevented communication.
 func (s *Server) broadcastToAgentStreaming(
 	ctx context.Context,
 	a2aClient *a2aclient.Client,
@@ -239,7 +282,7 @@ func (s *Server) broadcastToAgentStreaming(
 	resolved *ResolveResult,
 	alias string,
 	timeoutSeconds int,
-) *broadcastResult {
+) (*broadcastResult, bool) {
 	// Requirement: STRM-5.3 — per-agent broadcast timeout is already applied
 	// via the parent ctx (agentCtx) from broadcastToAgent. No additional
 	// timeout needed here.
@@ -248,24 +291,24 @@ func (s *Server) broadcastToAgentStreaming(
 	state := &streamState{}
 	result, err := consumeStream(ctx, events, state)
 	if err != nil {
-		return &broadcastResult{Status: "error", Error: err.Error()}
+		return &broadcastResult{Status: "error", Error: err.Error()}, false
 	}
 
 	// Convert streamResult to broadcastResult using the same logic as non-streaming path.
 	switch {
 	case result.task != nil:
-		return s.handleBroadcastTaskResult(result.task)
+		return s.handleBroadcastTaskResult(result.task), true
 
 	case result.message != nil:
 		text := extractContentFromMessageParts(result.message.Parts)
-		return &broadcastResult{Status: "success", Response: text}
+		return &broadcastResult{Status: "success", Response: text}, true
 
 	case result.terminatedByStatus:
 		task := buildTaskFromState(result.state)
-		return s.handleBroadcastTaskResult(task)
+		return s.handleBroadcastTaskResult(task), true
 
 	default:
-		return &broadcastResult{Status: "error", Error: "no terminal event received"}
+		return &broadcastResult{Status: "error", Error: "no terminal event received"}, false
 	}
 }
 
