@@ -767,14 +767,14 @@ func TestCallerCard_BroadcastMessage_InjectsCard(t *testing.T) {
 	defer agentB.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("bcast-a", agentA.URL, nil)
+	srv.registry.Connect("bcast-a", agentA.URL, nil, "")
 	srv.registry.SetCard("bcast-a", &a2a.AgentCard{
 		Name: "bcast-a",
 		SupportedInterfaces: []*a2a.AgentInterface{
 			a2a.NewAgentInterface(agentA.URL, a2a.TransportProtocolJSONRPC),
 		},
 	})
-	srv.registry.Connect("bcast-b", agentB.URL, nil)
+	srv.registry.Connect("bcast-b", agentB.URL, nil, "")
 	srv.registry.SetCard("bcast-b", &a2a.AgentCard{
 		Name: "bcast-b",
 		SupportedInterfaces: []*a2a.AgentInterface{
@@ -855,7 +855,7 @@ func TestCallerCard_StreamingPath_InjectsCard(t *testing.T) {
 	defer agent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("stream-card-agent", agent.URL, nil)
+	srv.registry.Connect("stream-card-agent", agent.URL, nil, "")
 	srv.registry.SetCard("stream-card-agent", &a2a.AgentCard{
 		Name:         "stream-card-agent",
 		Capabilities: a2a.AgentCapabilities{Streaming: true},

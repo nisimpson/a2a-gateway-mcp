@@ -11,8 +11,8 @@ import (
 // Requirements: RLIM-6.1, RLIM-6.2
 func TestListAgents_RateLimitedAgentsShowConfigValues(t *testing.T) {
 	srv := NewServer()
-	srv.registry.Connect("agent-a", "http://localhost:9001", nil)
-	srv.registry.Connect("agent-b", "http://localhost:9002", nil)
+	srv.registry.Connect("agent-a", "http://localhost:9001", nil, "")
+	srv.registry.Connect("agent-b", "http://localhost:9002", nil, "")
 
 	// Set rate limiters with specific config values.
 	srv.rateLimiters.Set("agent-a", 10.0, 20)
@@ -59,8 +59,8 @@ func TestListAgents_RateLimitedAgentsShowConfigValues(t *testing.T) {
 // Requirements: RLIM-6.1, RLIM-6.2
 func TestListAgents_UnlimitedAgentsShowUnlimited(t *testing.T) {
 	srv := NewServer()
-	srv.registry.Connect("free-agent-1", "http://localhost:8001", nil)
-	srv.registry.Connect("free-agent-2", "http://localhost:8002", nil)
+	srv.registry.Connect("free-agent-1", "http://localhost:8001", nil, "")
+	srv.registry.Connect("free-agent-2", "http://localhost:8002", nil, "")
 
 	// No rate limiters set — all agents should be "unlimited".
 
@@ -95,9 +95,9 @@ func TestListAgents_UnlimitedAgentsShowUnlimited(t *testing.T) {
 // Requirements: RLIM-6.1, RLIM-6.2
 func TestListAgents_MixedRateLimitAndUnlimited(t *testing.T) {
 	srv := NewServer()
-	srv.registry.Connect("limited-agent", "http://localhost:7001", nil)
-	srv.registry.Connect("unlimited-agent", "http://localhost:7002", nil)
-	srv.registry.Connect("another-limited", "http://localhost:7003", nil)
+	srv.registry.Connect("limited-agent", "http://localhost:7001", nil, "")
+	srv.registry.Connect("unlimited-agent", "http://localhost:7002", nil, "")
+	srv.registry.Connect("another-limited", "http://localhost:7003", nil, "")
 
 	// Set rate limiters only for some agents.
 	srv.rateLimiters.Set("limited-agent", 10.0, 20)

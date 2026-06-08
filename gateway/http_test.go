@@ -154,7 +154,7 @@ func TestPropertyURLBypassesHeaderInjection(t *testing.T) {
 			// Create a registry and register the agent with headers
 			registry := NewAgentRegistry()
 			headers := map[string]string{headerKey: headerVal}
-			registry.Connect(alias, agentURL, headers)
+			registry.Connect(alias, agentURL, headers, "")
 
 			// Resolve using the raw URL (not the alias)
 			result, err := ResolveAgent(registry, agentURL)
@@ -226,7 +226,7 @@ func TestPropertyURLBypassesHeaderInjection(t *testing.T) {
 				for j := 0; j < headerCount; j++ {
 					headers[fmt.Sprintf("X-Header-%d", j)] = fmt.Sprintf("value-%d", j)
 				}
-				registry.Connect(alias, url, headers)
+				registry.Connect(alias, url, headers, "")
 			}
 
 			// For each registered agent, resolve using the raw URL

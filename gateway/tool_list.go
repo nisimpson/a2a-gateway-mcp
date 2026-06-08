@@ -10,9 +10,11 @@ import (
 
 // listAgentEntry is the JSON representation of an agent in the list response.
 type listAgentEntry struct {
-	Alias     string `json:"alias"`
-	URL       string `json:"url"`
-	RateLimit string `json:"rate_limit"`
+	Alias               string `json:"alias"`
+	URL                 string `json:"url"`
+	RateLimit           string `json:"rate_limit"`
+	Health              string `json:"health"`
+	ConsecutiveFailures *int   `json:"consecutive_failures,omitempty"`
 }
 
 // handleListAgents returns a JSON array of all currently connected agents
@@ -29,10 +31,18 @@ func (s *Server) handleListAgents(_ context.Context, _ *mcp.CallToolRequest, _ L
 		} else {
 			rateLimit = "unlimited"
 		}
+		healthState := s.healthTracker.Get(entry.Alias)
+		var consecutiveFailures *int
+		if healthState.Status == HealthStatusUnhealthy {
+			consecutiveFailures = &healthState.Failures
+		}
+
 		result[i] = listAgentEntry{
-			Alias:     entry.Alias,
-			URL:       entry.URL,
-			RateLimit: rateLimit,
+			Alias:               entry.Alias,
+			URL:                 entry.URL,
+			RateLimit:           rateLimit,
+			Health:              string(healthState.Status),
+			ConsecutiveFailures: consecutiveFailures,
 		}
 	}
 

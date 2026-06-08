@@ -39,7 +39,7 @@ func TestHandleGetHistory_NoHistory(t *testing.T) {
 	srv := NewServer()
 
 	// Register an agent but don't record any history.
-	srv.registry.Connect("test-agent", "http://localhost:9999", nil)
+	srv.registry.Connect("test-agent", "http://localhost:9999", nil, "")
 
 	input := GetHistoryInput{
 		Agent: "test-agent",
@@ -66,7 +66,7 @@ func TestHandleGetHistory_LimitParameter(t *testing.T) {
 	srv := NewServer()
 
 	// Register an agent.
-	srv.registry.Connect("history-agent", "http://localhost:9999", nil)
+	srv.registry.Connect("history-agent", "http://localhost:9999", nil, "")
 
 	// Append several entries directly to the backend.
 	ctx := context.Background()

@@ -51,7 +51,7 @@ func TestPropertyAgentResolutionConsistency(t *testing.T) {
 			for i := range numAgents {
 				alias := fmt.Sprintf("agent-%d", i)
 				url := fmt.Sprintf("https://agent-%d.example.com", i)
-				registry.Connect(alias, url, map[string]string{"X-Agent": alias})
+				registry.Connect(alias, url, map[string]string{"X-Agent": alias}, "")
 				aliases = append(aliases, alias)
 			}
 
@@ -141,7 +141,7 @@ func TestPropertyAgentResolutionConsistency(t *testing.T) {
 			for _, alias := range aliasEntries {
 				if alias != "" {
 					url := fmt.Sprintf("https://%s.example.com", alias)
-					registry.Connect(alias, url, nil)
+					registry.Connect(alias, url, nil, "")
 				}
 			}
 

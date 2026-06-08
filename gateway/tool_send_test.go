@@ -178,7 +178,7 @@ func TestPropertyContextLifecycleCorrectness(t *testing.T) {
 			store := NewContextStore()
 
 			// Initial connect and store a context
-			registry.Connect(alias, "http://original.example.com", nil)
+			registry.Connect(alias, "http://original.example.com", nil, "")
 			store.Set(alias, storedCtx)
 
 			// Verify context is stored
@@ -192,7 +192,7 @@ func TestPropertyContextLifecycleCorrectness(t *testing.T) {
 			if existing != nil && existing.URL != newURL {
 				store.Delete(alias)
 			}
-			registry.Connect(alias, newURL, nil)
+			registry.Connect(alias, newURL, nil, "")
 
 			// Context should be cleared
 			return store.Get(alias) == ""
@@ -496,7 +496,7 @@ func TestHandleSendMessage_URLBased_BypassesContextStore(t *testing.T) {
 
 	srv := NewServer()
 	// Register an agent with the same URL under an alias (to verify URL-based doesn't use it)
-	srv.registry.Connect("some-alias", agent.URL, nil)
+	srv.registry.Connect("some-alias", agent.URL, nil, "")
 	srv.contextStore.Set("some-alias", "ctx-should-not-change")
 
 	input := SendMessageInput{
@@ -1847,4 +1847,104 @@ func TestHandleSendMessage_DataPartReachesAgent(t *testing.T) {
 	if dataField["action"] != "deploy" {
 		t.Errorf("expected action=%q, got %v", "deploy", dataField["action"])
 	}
+}
+
+// Feature: agent-health-checks, Property 11: Send message always attempts unhealthy agents
+// **Validates: Requirements HLTH-5.3**
+
+func TestPropertySendAlwaysAttemptsUnhealthy(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	// Generator for failure thresholds (1-10)
+	thresholdGen := gen.IntRange(1, 10)
+
+	// Generator for extra failures beyond threshold (0-5)
+	extraFailuresGen := gen.IntRange(0, 5)
+
+	properties.Property("send_message always attempts request to unhealthy agents", prop.ForAll(
+		func(threshold int, extraFailures int) bool {
+			// Track whether the backend received a request.
+			var requestReceived int32
+			agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requestReceived++
+				req, _ := readJSONRPCRequest(r)
+				task := &a2a.Task{
+					ID:     "task-health-1",
+					Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+					Artifacts: []*a2a.Artifact{
+						{Parts: a2a.ContentParts{a2a.NewTextPart("response from unhealthy agent")}},
+					},
+				}
+				writeJSONRPCResult(w, req.ID, jsonrpcTaskResult(task))
+			}))
+			defer agent.Close()
+
+			alias := "unhealthy-agent"
+
+			// Create a server with the specified threshold.
+			srv := NewServer(WithHealthCheck(HealthCheckOptions{FailureThreshold: threshold}))
+			srv.registry.Connect(alias, agent.URL, nil, "")
+			srv.registry.SetCard(alias, &a2a.AgentCard{
+				Name: alias,
+				SupportedInterfaces: []*a2a.AgentInterface{
+					a2a.NewAgentInterface(agent.URL, a2a.TransportProtocolJSONRPC),
+				},
+			})
+			// Register the agent in the health tracker.
+			srv.healthTracker.Reset(alias)
+
+			// Drive agent to unhealthy: record threshold + extra failures.
+			totalFailures := threshold + extraFailures
+			for i := 0; i < totalFailures; i++ {
+				srv.healthTracker.RecordFailure(alias)
+			}
+
+			// Verify agent is unhealthy before sending.
+			state := srv.healthTracker.Get(alias)
+			if state.Status != HealthStatusUnhealthy {
+				t.Logf("expected unhealthy status after %d failures (threshold=%d), got %s", totalFailures, threshold, state.Status)
+				return false
+			}
+
+			// Send a message to the unhealthy agent.
+			input := SendMessageInput{
+				Agent:   alias,
+				Message: "hello unhealthy agent",
+			}
+
+			result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+			if err != nil {
+				t.Logf("unexpected error: %v", err)
+				return false
+			}
+
+			// The request must have been sent to the backend (proving we don't skip unhealthy agents).
+			if requestReceived == 0 {
+				t.Log("send_message skipped unhealthy agent — request was not sent to backend")
+				return false
+			}
+
+			// The result should be successful (agent responded).
+			if result.IsError {
+				t.Log("unexpected error result from send_message")
+				return false
+			}
+
+			// After successful send, the agent should have recovered to healthy.
+			stateAfter := srv.healthTracker.Get(alias)
+			if stateAfter.Status != HealthStatusHealthy {
+				t.Logf("expected healthy after successful send, got %s", stateAfter.Status)
+				return false
+			}
+
+			return true
+		},
+		thresholdGen,
+		extraFailuresGen,
+	))
+
+	properties.TestingRun(t)
 }

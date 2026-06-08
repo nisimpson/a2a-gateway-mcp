@@ -223,7 +223,7 @@ func TestHandleGetTask_TaskNotFound(t *testing.T) {
 func TestHandleGetTask_UnreachableAgent(t *testing.T) {
 	srv := NewServer()
 	// Register an agent pointing to a non-existent server.
-	srv.registry.Connect("dead-agent", "http://127.0.0.1:1", nil)
+	srv.registry.Connect("dead-agent", "http://127.0.0.1:1", nil, "")
 
 	input := GetTaskInput{
 		Agent:  "dead-agent",

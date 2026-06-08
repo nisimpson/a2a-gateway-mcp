@@ -68,7 +68,7 @@ func writeJSONRPCError(w http.ResponseWriter, reqID string, code int, message st
 // the clientResolver creates a JSON-RPC transport client.
 func newTestServerWithAgent(alias, agentURL string) *Server {
 	srv := NewServer()
-	srv.registry.Connect(alias, agentURL, nil)
+	srv.registry.Connect(alias, agentURL, nil, "")
 	srv.registry.SetCard(alias, &a2a.AgentCard{
 		Name: alias,
 		SupportedInterfaces: []*a2a.AgentInterface{

@@ -39,7 +39,7 @@ func TestHandleClearHistory_Success(t *testing.T) {
 	srv := NewServer()
 
 	// Register an agent and append some history entries.
-	srv.registry.Connect("clear-agent", "http://localhost:9999", nil)
+	srv.registry.Connect("clear-agent", "http://localhost:9999", nil, "")
 
 	ctx := context.Background()
 	for i := range 3 {

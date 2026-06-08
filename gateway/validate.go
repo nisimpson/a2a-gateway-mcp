@@ -6,11 +6,12 @@ import (
 )
 
 const (
-	maxAliasLength      = 64
-	maxMessageLength    = 32768
-	maxHeaderEntries    = 20
-	maxBroadcastAliases = 20
-	minBroadcastAliases = 1
+	maxAliasLength        = 64
+	maxMessageLength      = 32768
+	maxHeaderEntries      = 20
+	maxBroadcastAliases   = 20
+	minBroadcastAliases   = 1
+	maxPingEndpointLength = 256
 )
 
 // ValidateAlias checks that the alias contains only lowercase letters, digits, and hyphens,
@@ -80,6 +81,18 @@ func ValidateBroadcastAliases(aliases []string) error {
 	}
 	if len(aliases) > maxBroadcastAliases {
 		return fmt.Errorf("broadcast targets must be at most %d aliases, got %d", maxBroadcastAliases, len(aliases))
+	}
+	return nil
+}
+
+// ValidatePingEndpoint checks that a ping endpoint path starts with "/" and is at most 256 characters.
+// Returns an error if invalid.
+func ValidatePingEndpoint(endpoint string) error {
+	if len(endpoint) == 0 || endpoint[0] != '/' {
+		return fmt.Errorf("ping_endpoint must start with '/'")
+	}
+	if len(endpoint) > maxPingEndpointLength {
+		return fmt.Errorf("ping_endpoint must be at most %d characters", maxPingEndpointLength)
 	}
 	return nil
 }

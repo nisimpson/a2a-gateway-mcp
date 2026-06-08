@@ -34,6 +34,9 @@ func (s *Server) handleDisconnectAgent(ctx context.Context, _ *mcp.CallToolReque
 	// Remove rate limiter for this agent.
 	s.rateLimiters.Remove(input.Alias)
 
+	// Delete health state for this agent.
+	s.healthTracker.Delete(input.Alias)
+
 	// Also delete context store entry.
 	s.contextStore.Delete(input.Alias)
 

@@ -150,6 +150,37 @@ func makeAliases(n int) []string {
 	return aliases
 }
 
+func TestValidatePingEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		wantErr  bool
+		errMsg   string
+	}{
+		{name: "valid simple path", endpoint: "/health", wantErr: false},
+		{name: "valid root path", endpoint: "/", wantErr: false},
+		{name: "valid nested path", endpoint: "/api/v1/health", wantErr: false},
+		{name: "valid max length", endpoint: "/" + strings.Repeat("a", 255), wantErr: false},
+		{name: "empty string", endpoint: "", wantErr: true, errMsg: "ping_endpoint must start with '/'"},
+		{name: "missing leading slash", endpoint: "health", wantErr: true, errMsg: "ping_endpoint must start with '/'"},
+		{name: "exceeds max length", endpoint: "/" + strings.Repeat("a", 256), wantErr: true, errMsg: "ping_endpoint must be at most 256 characters"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePingEndpoint(tt.endpoint)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidatePingEndpoint(%q) error = %v, wantErr %v", tt.endpoint, err, tt.wantErr)
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" {
+				if err.Error() != tt.errMsg {
+					t.Errorf("ValidatePingEndpoint(%q) error = %q, want %q", tt.endpoint, err.Error(), tt.errMsg)
+				}
+			}
+		})
+	}
+}
+
 // Feature: a2a-gateway-mcp, Property 9: Input validation rejects invalid aliases
 // **Validates: Requirements AGMCP-5.9**
 

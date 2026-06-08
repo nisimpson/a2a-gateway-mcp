@@ -153,3 +153,103 @@ func connectTestClient(t *testing.T, server *mcp.Server) *mcp.ClientSession {
 	}
 	return session
 }
+
+func TestNewServer_DefaultHealthTracker(t *testing.T) {
+	srv := NewServer()
+	if srv.healthTracker == nil {
+		t.Fatal("expected healthTracker to be initialized")
+	}
+	if !srv.healthTracker.IsEnabled() {
+		t.Error("expected health tracking to be enabled by default")
+	}
+	// Default threshold is 3: need 3 failures to become unhealthy.
+	srv.healthTracker.Reset("test-agent")
+	srv.healthTracker.RecordFailure("test-agent")
+	srv.healthTracker.RecordFailure("test-agent")
+	state := srv.healthTracker.Get("test-agent")
+	if state.Status != HealthStatusUnknown {
+		t.Errorf("expected unknown after 2 failures (threshold=3), got %s", state.Status)
+	}
+	srv.healthTracker.RecordFailure("test-agent")
+	state = srv.healthTracker.Get("test-agent")
+	if state.Status != HealthStatusUnhealthy {
+		t.Errorf("expected unhealthy after 3 failures, got %s", state.Status)
+	}
+}
+
+func TestWithHealthCheck_CustomThreshold(t *testing.T) {
+	srv := NewServer(WithHealthCheck(HealthCheckOptions{FailureThreshold: 5}))
+	if srv.healthTracker == nil {
+		t.Fatal("expected healthTracker to be initialized")
+	}
+	if !srv.healthTracker.IsEnabled() {
+		t.Error("expected health tracking to be enabled with threshold 5")
+	}
+	// Verify threshold is 5.
+	srv.healthTracker.Reset("agent")
+	for i := 0; i < 4; i++ {
+		srv.healthTracker.RecordFailure("agent")
+	}
+	state := srv.healthTracker.Get("agent")
+	if state.Status == HealthStatusUnhealthy {
+		t.Error("expected agent to still be non-unhealthy after 4 failures with threshold=5")
+	}
+	srv.healthTracker.RecordFailure("agent")
+	state = srv.healthTracker.Get("agent")
+	if state.Status != HealthStatusUnhealthy {
+		t.Errorf("expected unhealthy after 5 failures, got %s", state.Status)
+	}
+}
+
+func TestWithHealthCheck_ZeroThresholdDisables(t *testing.T) {
+	srv := NewServer(WithHealthCheck(HealthCheckOptions{FailureThreshold: 0}))
+	if srv.healthTracker == nil {
+		t.Fatal("expected healthTracker to be initialized")
+	}
+	if srv.healthTracker.IsEnabled() {
+		t.Error("expected health tracking to be disabled with threshold 0")
+	}
+}
+
+func TestWithHealthCheck_NegativeThresholdTreatedAsZero(t *testing.T) {
+	srv := NewServer(WithHealthCheck(HealthCheckOptions{FailureThreshold: -5}))
+	if srv.healthTracker == nil {
+		t.Fatal("expected healthTracker to be initialized")
+	}
+	if srv.healthTracker.IsEnabled() {
+		t.Error("expected health tracking to be disabled with negative threshold")
+	}
+}
+
+func TestNewServer_DefaultPingStrategy(t *testing.T) {
+	srv := NewServer()
+	if srv.pingStrategy == nil {
+		t.Fatal("expected pingStrategy to be initialized")
+	}
+	// Verify it's a DefaultPingStrategy wrapping the server's HTTP client.
+	dps, ok := srv.pingStrategy.(*DefaultPingStrategy)
+	if !ok {
+		t.Fatalf("expected *DefaultPingStrategy, got %T", srv.pingStrategy)
+	}
+	if dps.client != srv.httpClient {
+		t.Error("expected DefaultPingStrategy to reuse the server's httpClient")
+	}
+}
+
+func TestWithHealthCheck_CustomPingStrategy(t *testing.T) {
+	custom := &mockPingStrategy{}
+	srv := NewServer(WithHealthCheck(HealthCheckOptions{
+		FailureThreshold: 3,
+		PingStrategy:     custom,
+	}))
+	if srv.pingStrategy != custom {
+		t.Error("expected custom ping strategy to be set")
+	}
+}
+
+// mockPingStrategy is a test double for PingStrategy.
+type mockPingStrategy struct{}
+
+func (m *mockPingStrategy) Ping(_ context.Context, _ PingTarget) PingResult {
+	return PingResult{Reachable: true}
+}

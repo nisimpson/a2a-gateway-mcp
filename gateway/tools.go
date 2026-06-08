@@ -11,6 +11,7 @@ type ConnectAgentInput struct {
 	Headers        map[string]string `json:"headers,omitempty" jsonschema:"optional HTTP headers to include on all requests to this agent (max 20 entries)"`
 	RateLimitRPS   *float64          `json:"rate_limit_rps,omitempty" jsonschema:"requests per second rate limit for this agent (must be provided with rate_limit_burst)"`
 	RateLimitBurst *int              `json:"rate_limit_burst,omitempty" jsonschema:"burst capacity for this agent's rate limiter (must be provided with rate_limit_rps)"`
+	PingEndpoint   *string           `json:"ping_endpoint,omitempty" jsonschema:"relative URL path for liveness checks (starts with /, max 256 chars)"`
 }
 
 // DisconnectAgentInput is the input schema for the disconnect_agent tool.
@@ -174,6 +175,11 @@ Use 'message' for simple plain-text broadcasts. Use 'parts' when you need to sen
 		Name:        "discover_agents",
 		Description: "Discover available agents from a remote agent directory service",
 	}, s.handleDiscoverAgents)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "ping_agent",
+		Description: "Perform a liveness check on a registered agent to verify reachability",
+	}, s.handlePingAgent)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
 		Name: "create_caller_card",

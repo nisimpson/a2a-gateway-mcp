@@ -73,7 +73,7 @@ func TestBroadcast_StreamingForCapableAgent_PollingForNon(t *testing.T) {
 	srv := NewServer()
 
 	// Register streaming agent with Streaming=true
-	srv.registry.Connect("streaming-bcast", streamingAgent.URL, nil)
+	srv.registry.Connect("streaming-bcast", streamingAgent.URL, nil, "")
 	srv.registry.SetCard("streaming-bcast", &a2a.AgentCard{
 		Name:         "streaming-bcast",
 		Capabilities: a2a.AgentCapabilities{Streaming: true},
@@ -83,7 +83,7 @@ func TestBroadcast_StreamingForCapableAgent_PollingForNon(t *testing.T) {
 	})
 
 	// Register non-streaming agent with Streaming=false (default)
-	srv.registry.Connect("polling-bcast", pollingAgent.URL, nil)
+	srv.registry.Connect("polling-bcast", pollingAgent.URL, nil, "")
 	srv.registry.SetCard("polling-bcast", &a2a.AgentCard{
 		Name:         "polling-bcast",
 		Capabilities: a2a.AgentCapabilities{Streaming: false},
@@ -168,7 +168,7 @@ func TestBroadcast_PerAgentTimeout_AppliedAsStreamTimeout(t *testing.T) {
 	defer agent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("slow-stream", agent.URL, nil)
+	srv.registry.Connect("slow-stream", agent.URL, nil, "")
 	srv.registry.SetCard("slow-stream", &a2a.AgentCard{
 		Name:         "slow-stream",
 		Capabilities: a2a.AgentCapabilities{Streaming: true},
@@ -247,7 +247,7 @@ func TestBroadcast_ResultShapeIdentical_StreamingAndNonStreaming(t *testing.T) {
 	defer pollingAgent.Close()
 
 	srv := NewServer()
-	srv.registry.Connect("stream-shape", streamingAgent.URL, nil)
+	srv.registry.Connect("stream-shape", streamingAgent.URL, nil, "")
 	srv.registry.SetCard("stream-shape", &a2a.AgentCard{
 		Name:         "stream-shape",
 		Capabilities: a2a.AgentCapabilities{Streaming: true},
@@ -255,7 +255,7 @@ func TestBroadcast_ResultShapeIdentical_StreamingAndNonStreaming(t *testing.T) {
 			a2a.NewAgentInterface(streamingAgent.URL, a2a.TransportProtocolJSONRPC),
 		},
 	})
-	srv.registry.Connect("poll-shape", pollingAgent.URL, nil)
+	srv.registry.Connect("poll-shape", pollingAgent.URL, nil, "")
 	srv.registry.SetCard("poll-shape", &a2a.AgentCard{
 		Name:         "poll-shape",
 		Capabilities: a2a.AgentCapabilities{Streaming: false},

@@ -38,6 +38,16 @@ func (s *Server) handleConnectAgent(ctx context.Context, _ *mcp.CallToolRequest,
 		}, nil, nil
 	}
 
+	// Validate ping_endpoint if provided.
+	if input.PingEndpoint != nil {
+		if err := ValidatePingEndpoint(*input.PingEndpoint); err != nil {
+			return &mcp.CallToolResult{
+				IsError: true,
+				Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+			}, nil, nil
+		}
+	}
+
 	// Validate rate limit parameters.
 	if (input.RateLimitRPS != nil) != (input.RateLimitBurst != nil) {
 		return &mcp.CallToolResult{
@@ -68,7 +78,11 @@ func (s *Server) handleConnectAgent(ctx context.Context, _ *mcp.CallToolRequest,
 	}
 
 	// Add or update the registry entry.
-	s.registry.Connect(input.Alias, input.AgentURL, input.Headers)
+	pingEndpoint := ""
+	if input.PingEndpoint != nil {
+		pingEndpoint = *input.PingEndpoint
+	}
+	s.registry.Connect(input.Alias, input.AgentURL, input.Headers, pingEndpoint)
 
 	// Create or replace the rate limiter for the agent.
 	if input.RateLimitRPS != nil && input.RateLimitBurst != nil {
@@ -90,6 +104,9 @@ func (s *Server) handleConnectAgent(ctx context.Context, _ *mcp.CallToolRequest,
 	if card != nil {
 		s.registry.SetCard(input.Alias, card)
 	}
+
+	// Initialize health state to (unknown, 0) for this agent.
+	s.healthTracker.Reset(input.Alias)
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{

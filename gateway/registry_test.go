@@ -37,7 +37,7 @@ func TestPropertyRegistryConcurrentSafety(t *testing.T) {
 			for i := 0; i < n; i++ {
 				go func(idx int) {
 					defer wg.Done()
-					registry.Connect(aliases[idx], urls[idx], nil)
+					registry.Connect(aliases[idx], urls[idx], nil, "")
 				}(i)
 			}
 			wg.Wait()
@@ -102,7 +102,7 @@ func TestPropertyListAgentsSorted(t *testing.T) {
 			// Connect all entries
 			for _, alias := range unique {
 				url := fmt.Sprintf("https://%s.example.com", alias)
-				registry.Connect(alias, url, nil)
+				registry.Connect(alias, url, nil, "")
 			}
 
 			// Call List and verify
@@ -182,7 +182,7 @@ func TestPropertyRegistryDisconnectAtomicity(t *testing.T) {
 			// Connect all entries and set context store entries
 			for _, alias := range unique {
 				url := fmt.Sprintf("https://%s.example.com", alias)
-				registry.Connect(alias, url, map[string]string{"X-Agent": alias})
+				registry.Connect(alias, url, map[string]string{"X-Agent": alias}, "")
 				contextStore.Set(alias, fmt.Sprintf("ctx-%s", alias))
 			}
 

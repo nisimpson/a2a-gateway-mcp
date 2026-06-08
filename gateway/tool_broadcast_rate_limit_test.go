@@ -34,7 +34,7 @@ func TestBroadcast_MixedRateLimits(t *testing.T) {
 	srv := NewServer()
 	// Register three agents pointing to the same mock server.
 	for _, alias := range []string{"agent-ok1", "agent-ok2", "agent-limited"} {
-		srv.registry.Connect(alias, agent.URL, nil)
+		srv.registry.Connect(alias, agent.URL, nil, "")
 		srv.registry.SetCard(alias, &a2a.AgentCard{
 			Name: alias,
 			SupportedInterfaces: []*a2a.AgentInterface{
@@ -127,7 +127,7 @@ func TestBroadcast_AllWithinRateLimit(t *testing.T) {
 	srv := NewServer()
 	aliases := []string{"rl-a", "rl-b", "rl-c"}
 	for _, alias := range aliases {
-		srv.registry.Connect(alias, agent.URL, nil)
+		srv.registry.Connect(alias, agent.URL, nil, "")
 		srv.registry.SetCard(alias, &a2a.AgentCard{
 			Name: alias,
 			SupportedInterfaces: []*a2a.AgentInterface{
@@ -203,7 +203,7 @@ func TestBroadcast_AllRateLimited(t *testing.T) {
 	srv := NewServer()
 	aliases := []string{"limited-a", "limited-b", "limited-c"}
 	for _, alias := range aliases {
-		srv.registry.Connect(alias, agent.URL, nil)
+		srv.registry.Connect(alias, agent.URL, nil, "")
 		srv.registry.SetCard(alias, &a2a.AgentCard{
 			Name: alias,
 			SupportedInterfaces: []*a2a.AgentInterface{
