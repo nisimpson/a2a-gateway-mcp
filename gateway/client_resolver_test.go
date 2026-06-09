@@ -268,8 +268,8 @@ func TestFormatStreamTask_UnrecognizedState_ReturnsProtocolError(t *testing.T) {
 
 func TestHandleConnectAgent_EvictsCachedClientOnReconnect(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Serve agent card at /.well-known/agent.json
-		if r.URL.Path == "/.well-known/agent.json" {
+		// Serve agent card at /.well-known/agent-card.json
+		if r.URL.Path == "/.well-known/agent-card.json" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -371,7 +371,7 @@ func TestHandleTaskResult_KnownNonTerminal_WorkingState_Polls(t *testing.T) {
 
 func TestHandleConnectAgent_EvictsOnURLChange(t *testing.T) {
 	agent1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/.well-known/agent.json" {
+		if r.URL.Path == "/.well-known/agent-card.json" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -388,7 +388,7 @@ func TestHandleConnectAgent_EvictsOnURLChange(t *testing.T) {
 	defer agent1.Close()
 
 	agent2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/.well-known/agent.json" {
+		if r.URL.Path == "/.well-known/agent-card.json" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

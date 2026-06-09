@@ -58,7 +58,7 @@ func main() {
 	go func() {
 		addr := fmt.Sprintf(":%d", port)
 		log.Printf("knock-knock agent listening on %s", addr)
-		log.Printf("  agent card: http://localhost:%d/.well-known/agent.json", port)
+		log.Printf("  agent card: http://localhost:%d/.well-known/agent-card.json", port)
 		if err := srv.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}
@@ -120,7 +120,7 @@ func newKnockKnockServer(port int) *knockKnockServer {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /.well-known/agent.json", s.handleAgentCard)
+	mux.HandleFunc("GET /.well-known/agent-card.json", s.handleAgentCard)
 	mux.HandleFunc("POST /", s.handlePost)
 
 	s.httpServer = &http.Server{

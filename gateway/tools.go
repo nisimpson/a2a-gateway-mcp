@@ -185,7 +185,7 @@ Use 'message' for simple plain-text broadcasts. Use 'parts' when you need to sen
 		Name: "create_caller_card",
 		Description: `Register a caller agent card that is automatically included on all outbound messages (send_message and broadcast_message).
 
-Calling again replaces the previous card. This enables target agents to discover the caller's capabilities and delegate tasks back without requiring a .well-known/agent.json endpoint.`,
+Calling again replaces the previous card. This enables target agents to discover the caller's capabilities and delegate tasks back without requiring a .well-known/agent-card.json endpoint.`,
 	}, s.handleCreateCallerCard)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{

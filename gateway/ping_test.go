@@ -9,10 +9,10 @@ import (
 )
 
 func TestDefaultPingStrategy_DefaultEndpoint(t *testing.T) {
-	// Start a test server that responds on /.well-known/agent.json
+	// Start a test server that responds on /.well-known/agent-card.json
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/.well-known/agent.json" {
-			t.Errorf("expected path /.well-known/agent.json, got %s", r.URL.Path)
+		if r.URL.Path != "/.well-known/agent-card.json" {
+			t.Errorf("expected path /.well-known/agent-card.json, got %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -172,8 +172,8 @@ func TestDefaultPingStrategy_ContextTimeout(t *testing.T) {
 
 func TestDefaultPingStrategy_TrailingSlashHandling(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/.well-known/agent.json" {
-			t.Errorf("expected path /.well-known/agent.json, got %s", r.URL.Path)
+		if r.URL.Path != "/.well-known/agent-card.json" {
+			t.Errorf("expected path /.well-known/agent-card.json, got %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -206,13 +206,13 @@ func TestBuildPingURL(t *testing.T) {
 			name:         "default endpoint no trailing slash",
 			baseURL:      "http://example.com",
 			pingEndpoint: "",
-			expected:     "http://example.com/.well-known/agent.json",
+			expected:     "http://example.com/.well-known/agent-card.json",
 		},
 		{
 			name:         "default endpoint with trailing slash",
 			baseURL:      "http://example.com/",
 			pingEndpoint: "",
-			expected:     "http://example.com/.well-known/agent.json",
+			expected:     "http://example.com/.well-known/agent-card.json",
 		},
 		{
 			name:         "custom endpoint with leading slash",

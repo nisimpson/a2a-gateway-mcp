@@ -34,7 +34,7 @@ type PingStrategy interface {
 }
 
 // DefaultPingStrategy performs an HTTP GET to the agent's configured
-// PingEndpoint, or falls back to .well-known/agent.json.
+// PingEndpoint, or falls back to .well-known/agent-card.json.
 // It uses the server's existing HTTP client (the one configured via
 // WithHTTPClient or the default) — it does NOT create its own client.
 type DefaultPingStrategy struct {
@@ -81,7 +81,7 @@ func (d *DefaultPingStrategy) Ping(ctx context.Context, target PingTarget) PingR
 
 // buildPingURL constructs the full URL for the ping request.
 // If pingEndpoint is non-empty, it is joined to the base URL.
-// Otherwise, defaults to .well-known/agent.json relative to the base URL.
+// Otherwise, defaults to .well-known/agent-card.json relative to the base URL.
 func buildPingURL(baseURL, pingEndpoint string) string {
 	base := strings.TrimRight(baseURL, "/")
 	if pingEndpoint != "" {
@@ -91,5 +91,5 @@ func buildPingURL(baseURL, pingEndpoint string) string {
 		}
 		return base + pingEndpoint
 	}
-	return base + "/.well-known/agent.json"
+	return base + "/.well-known/agent-card.json"
 }

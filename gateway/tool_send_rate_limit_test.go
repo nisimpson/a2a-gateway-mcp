@@ -223,7 +223,7 @@ func TestSendMessage_RateLimitViaToolCall(t *testing.T) {
 	// Mock A2A agent that serves both the agent card and JSON-RPC requests.
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Serve agent card discovery request.
-		if r.URL.Path == "/.well-known/agent.json" {
+		if r.URL.Path == "/.well-known/agent-card.json" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
