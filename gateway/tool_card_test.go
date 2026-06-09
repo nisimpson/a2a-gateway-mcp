@@ -21,7 +21,7 @@ func TestGetAgentCard_AliasResolution(t *testing.T) {
 	cardJSON, _ := json.Marshal(agentCard)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/.well-known/agent.json" {
+		if r.URL.Path != "/.well-known/agent-card.json" {
 			http.NotFound(w, r)
 			return
 		}
@@ -108,7 +108,7 @@ func TestGetAgentCard_URLBasedAccess(t *testing.T) {
 	cardJSON, _ := json.Marshal(agentCard)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/.well-known/agent.json" {
+		if r.URL.Path != "/.well-known/agent-card.json" {
 			http.NotFound(w, r)
 			return
 		}

@@ -56,7 +56,7 @@ func main() {
 	go func() {
 		addr := fmt.Sprintf(":%d", port)
 		log.Printf("mock a2a server %q listening on %s", name, addr)
-		log.Printf("  agent card: http://localhost:%d/.well-known/agent.json", port)
+		log.Printf("  agent card: http://localhost:%d/.well-known/agent-card.json", port)
 		log.Printf("  directory:  http://localhost:%d/agents", port)
 		if err := srv.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
@@ -103,7 +103,7 @@ func newMockServer(name string, port int) *mockServer {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /.well-known/agent.json", s.handleAgentCard)
+	mux.HandleFunc("GET /.well-known/agent-card.json", s.handleAgentCard)
 	mux.Handle("GET /agents", dir)
 	mux.HandleFunc("POST /", s.handlePost)
 
@@ -144,7 +144,7 @@ func (s *mockServer) agentCard() a2a.AgentCard {
 	}
 }
 
-// handleAgentCard serves the agent card at /.well-known/agent.json.
+// handleAgentCard serves the agent card at /.well-known/agent-card.json.
 func (s *mockServer) handleAgentCard(w http.ResponseWriter, _ *http.Request) {
 	card := s.agentCard()
 	w.Header().Set("Content-Type", "application/json")

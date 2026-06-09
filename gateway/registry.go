@@ -31,7 +31,7 @@ func NewAgentRegistry() *AgentRegistry {
 
 // Connect adds or updates an agent entry. Returns true if the entry was
 // updated (alias already existed), false if it was newly added.
-// The pingEndpoint is optional — an empty string means "use default endpoint (.well-known/agent.json)".
+// The pingEndpoint is optional — an empty string means "use default endpoint (.well-known/agent-card.json)".
 func (r *AgentRegistry) Connect(alias, url string, headers map[string]string, pingEndpoint string) (updated bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

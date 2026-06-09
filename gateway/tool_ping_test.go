@@ -128,7 +128,7 @@ func TestPingAgent_UnregisteredAlias(t *testing.T) {
 
 func TestPingAgent_DefaultEndpoint(t *testing.T) {
 	// Validates: HLTH-3.3 — when no PingEndpoint configured, target has empty
-	// PingEndpoint (DefaultPingStrategy resolves to .well-known/agent.json)
+	// PingEndpoint (DefaultPingStrategy resolves to .well-known/agent-card.json)
 	mock := &recordingPingStrategy{
 		result: PingResult{Reachable: true, ResponseTime: 42 * time.Millisecond},
 	}

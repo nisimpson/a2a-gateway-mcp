@@ -19,7 +19,7 @@ func TestConnectAgent_FetchesCardOnSuccess(t *testing.T) {
 	cardJSON, _ := json.Marshal(agentCard)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/.well-known/agent.json" {
+		if r.URL.Path == "/.well-known/agent-card.json" {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(cardJSON)
 			return

@@ -115,11 +115,11 @@ func (s *Server) handleConnectAgent(ctx context.Context, _ *mcp.CallToolRequest,
 	}, nil, nil
 }
 
-// fetchAgentCard attempts to fetch an AgentCard from <agentURL>/.well-known/agent.json.
+// fetchAgentCard attempts to fetch an AgentCard from <agentURL>/.well-known/agent-card.json.
 // Returns nil if the fetch fails for any reason (network error, non-200, invalid JSON).
 func (s *Server) fetchAgentCard(ctx context.Context, agentURL string, headers map[string]string) *a2a.AgentCard {
 	// Build the agent card URL.
-	cardURL := strings.TrimRight(agentURL, "/") + "/.well-known/agent.json"
+	cardURL := strings.TrimRight(agentURL, "/") + "/.well-known/agent-card.json"
 
 	// Use an HTTP client with the agent's headers applied.
 	client := s.httpClient

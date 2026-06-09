@@ -12,7 +12,7 @@ import (
 )
 
 // handleGetAgentCard retrieves the agent card from an A2A agent's
-// /.well-known/agent.json endpoint.
+// /.well-known/agent-card.json endpoint.
 func (s *Server) handleGetAgentCard(ctx context.Context, _ *mcp.CallToolRequest, input GetAgentCardInput) (*mcp.CallToolResult, any, error) {
 	// Validate agent identifier is non-empty.
 	if strings.TrimSpace(input.Agent) == "" {
@@ -43,7 +43,7 @@ func (s *Server) handleGetAgentCard(ctx context.Context, _ *mcp.CallToolRequest,
 	}
 
 	// Build the agent card URL.
-	agentCardURL := strings.TrimRight(resolved.URL, "/") + "/.well-known/agent.json"
+	agentCardURL := strings.TrimRight(resolved.URL, "/") + "/.well-known/agent-card.json"
 
 	// Create the HTTP GET request.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, agentCardURL, nil)
