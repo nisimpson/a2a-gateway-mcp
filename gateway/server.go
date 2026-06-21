@@ -192,14 +192,14 @@ func NewServer(opts ...Option) *Server {
 	}, nil)
 
 	s := &Server{
-		mcpServer:     mcpServer,
+		mcpServer:       mcpServer,
 		registry:        registry.NewAgentRegistry(),
 		contextStore:    registry.NewContextStore(),
 		callerCardStore: registry.NewCallerCardStore(),
-		httpClient:    cfg.httpClient,
-		pollTimeout:   cfg.pollTimeout,
-		streamTimeout: cfg.streamTimeout,
-		rateLimiters:  registry.NewRateLimiterRegistry(),
+		httpClient:      cfg.httpClient,
+		pollTimeout:     cfg.pollTimeout,
+		streamTimeout:   cfg.streamTimeout,
+		rateLimiters:    registry.NewRateLimiterRegistry(),
 	}
 
 	// Set global default rate limit if both RPS and burst are positive.

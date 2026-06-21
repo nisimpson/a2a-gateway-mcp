@@ -7,7 +7,7 @@ const defaultCallerCardKey = "caller_agent_card"
 // CallerCardStore manages the stored caller card state.
 // It is safe for concurrent access from multiple goroutines.
 type CallerCardStore struct {
-	mu  sync.RWMutex
+	mu   sync.RWMutex
 	card *CallerCard
 	key  string
 }
