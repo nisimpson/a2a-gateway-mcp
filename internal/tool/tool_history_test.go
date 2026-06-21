@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/nisimpson/a2a-gateway-mcp/history"
-	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 func newGetHistoryTool() (*GetHistoryTool, *mockRegistry, *mockHistoryBackend) {

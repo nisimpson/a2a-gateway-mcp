@@ -3,6 +3,8 @@ package gateway
 import (
 	"net/http"
 	"strings"
+
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 // headerRoundTripper wraps an http.RoundTripper and injects static headers
@@ -36,7 +38,7 @@ func isProtocolHeader(name string) bool {
 // httpClientForAgent returns an *http.Client configured with the agent's
 // static headers composed on top of the given base http.Client.
 // If the entry has no headers, the base client is returned as-is.
-func httpClientForAgent(base *http.Client, entry *AgentEntry) *http.Client {
+func httpClientForAgent(base *http.Client, entry *registry.RegisteredAgent) *http.Client {
 	if len(entry.Headers) == 0 {
 		return base
 	}

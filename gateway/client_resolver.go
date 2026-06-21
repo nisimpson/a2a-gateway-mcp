@@ -7,6 +7,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 // clientResolver creates and caches a2aclient.Client instances per agent.
@@ -15,16 +16,16 @@ import (
 type clientResolver struct {
 	mu         sync.RWMutex
 	clients    map[string]*a2aclient.Client // key: agent URL
-	registry   *AgentRegistry
+	registry   *registry.AgentRegistry
 	httpClient *http.Client
 }
 
 // newClientResolver creates a new clientResolver with the given registry
 // and base HTTP client.
-func newClientResolver(registry *AgentRegistry, httpClient *http.Client) *clientResolver {
+func newClientResolver(reg *registry.AgentRegistry, httpClient *http.Client) *clientResolver {
 	return &clientResolver{
 		clients:    make(map[string]*a2aclient.Client),
-		registry:   registry,
+		registry:   reg,
 		httpClient: httpClient,
 	}
 }
@@ -126,6 +127,6 @@ func (r *clientResolver) httpClientForResolved(resolved *ResolveResult) *http.Cl
 	if len(resolved.Headers) == 0 {
 		return r.httpClient
 	}
-	entry := &AgentEntry{Headers: resolved.Headers}
+	entry := &registry.RegisteredAgent{Headers: resolved.Headers}
 	return httpClientForAgent(r.httpClient, entry)
 }

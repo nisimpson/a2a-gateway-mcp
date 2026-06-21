@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 func newDisconnectTool() (*DisconnectAgentTool, *mockRegistry, *mockClientResolver, *mockRateLimiter, *mockHealthTracker, *mockContextStore) {

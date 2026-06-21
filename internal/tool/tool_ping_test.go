@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 func newPingTool() (*PingAgentTool, *mockRegistry, *mockHealthTracker, *mockPingStrategy) {

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 func newConnectTool() (*ConnectAgentTool, *mockRegistry, *mockClientResolver, *mockRateLimiter, *mockHealthTracker, *mockCardFetcher) {

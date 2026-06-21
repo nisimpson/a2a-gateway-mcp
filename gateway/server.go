@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nisimpson/a2a-gateway-mcp/health"
 	"github.com/nisimpson/a2a-gateway-mcp/history"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 const (
@@ -147,7 +148,7 @@ func WithHealthCheck(opts HealthCheckOptions) Option {
 // the agent registry and context store.
 type Server struct {
 	mcpServer     *mcp.Server
-	registry      *AgentRegistry
+	registry      *registry.AgentRegistry
 	contextStore  *ContextStore
 	httpClient    *http.Client
 	clients       *clientResolver
@@ -195,7 +196,7 @@ func NewServer(opts ...Option) *Server {
 
 	s := &Server{
 		mcpServer:     mcpServer,
-		registry:      NewAgentRegistry(),
+		registry:      registry.NewAgentRegistry(),
 		contextStore:  NewContextStore(),
 		httpClient:    cfg.httpClient,
 		pollTimeout:   cfg.pollTimeout,

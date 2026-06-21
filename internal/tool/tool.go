@@ -9,7 +9,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nisimpson/a2a-gateway-mcp/history"
-	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 type Env struct {

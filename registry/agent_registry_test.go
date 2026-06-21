@@ -1,4 +1,4 @@
-package gateway
+package registry
 
 import (
 	"fmt"
@@ -177,13 +177,13 @@ func TestPropertyRegistryDisconnectAtomicity(t *testing.T) {
 			}
 
 			registry := NewAgentRegistry()
-			contextStore := NewContextStore()
+			contextStore := make(map[string]string)
 
 			// Connect all entries and set context store entries
 			for _, alias := range unique {
 				url := fmt.Sprintf("https://%s.example.com", alias)
 				registry.Connect(alias, url, map[string]string{"X-Agent": alias}, "")
-				contextStore.Set(alias, fmt.Sprintf("ctx-%s", alias))
+				contextStore[alias] = fmt.Sprintf("ctx-%s", alias)
 			}
 
 			// Pick the alias to disconnect
@@ -191,7 +191,7 @@ func TestPropertyRegistryDisconnectAtomicity(t *testing.T) {
 
 			// Simulate atomic disconnect: remove from registry and context store
 			registry.Disconnect(targetAlias)
-			contextStore.Delete(targetAlias)
+			delete(contextStore, targetAlias)
 
 			// Verify: disconnected alias is NOT in the registry
 			if registry.Lookup(targetAlias) != nil {
@@ -199,7 +199,7 @@ func TestPropertyRegistryDisconnectAtomicity(t *testing.T) {
 			}
 
 			// Verify: disconnected alias is NOT in the context store
-			if contextStore.Get(targetAlias) != "" {
+			if contextStore[targetAlias] != "" {
 				return false
 			}
 
@@ -224,7 +224,7 @@ func TestPropertyRegistryDisconnectAtomicity(t *testing.T) {
 
 				// Check context store entry is still present
 				expectedCtx := fmt.Sprintf("ctx-%s", alias)
-				if contextStore.Get(alias) != expectedCtx {
+				if contextStore[alias] != expectedCtx {
 					return false
 				}
 			}

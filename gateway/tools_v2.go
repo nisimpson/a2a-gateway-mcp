@@ -7,9 +7,9 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/nisimpson/a2a-gateway-mcp/history"
-	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/tool"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/validate"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 func (s *Server) registerToolsV2() {
@@ -44,32 +44,23 @@ func (s *Server) toolDefaultRateLimit() tool.RateLimitConfig {
 }
 
 // --- AgentRegistry adapter ---
-// Wraps the gateway's *AgentRegistry and converts its types to
-// *registry.RegisteredAgent for the tool interface.
+// Wraps *registry.AgentRegistry and adds ResolveAgent/SupportsStreaming
+// which are not part of the registry package itself.
 
 func (s *Server) registryAdapter() *agentRegistryAdapter {
 	return &agentRegistryAdapter{registry: s.registry}
 }
 
 type agentRegistryAdapter struct {
-	registry *AgentRegistry
+	registry *registry.AgentRegistry
 }
 
 func (a *agentRegistryAdapter) Lookup(alias string) *registry.RegisteredAgent {
-	entry := a.registry.Lookup(alias)
-	if entry == nil {
-		return nil
-	}
-	return toRegisteredAgent(entry)
+	return a.registry.Lookup(alias)
 }
 
 func (a *agentRegistryAdapter) List() []*registry.RegisteredAgent {
-	entries := a.registry.List()
-	out := make([]*registry.RegisteredAgent, len(entries))
-	for i, e := range entries {
-		out[i] = toRegisteredAgent(e)
-	}
-	return out
+	return a.registry.List()
 }
 
 func (a *agentRegistryAdapter) Connect(alias, url string, headers map[string]string, pingEndpoint string) bool {
@@ -77,11 +68,7 @@ func (a *agentRegistryAdapter) Connect(alias, url string, headers map[string]str
 }
 
 func (a *agentRegistryAdapter) Disconnect(alias string) *registry.RegisteredAgent {
-	entry := a.registry.Disconnect(alias)
-	if entry == nil {
-		return nil
-	}
-	return toRegisteredAgent(entry)
+	return a.registry.Disconnect(alias)
 }
 
 func (a *agentRegistryAdapter) SetCard(alias string, card *a2a.AgentCard) bool {
@@ -118,17 +105,6 @@ func (a *agentRegistryAdapter) SupportsStreaming(resolved *tool.ResolveResult) b
 		return false
 	}
 	return entry.Card.Capabilities.Streaming
-}
-
-// toRegisteredAgent converts a gateway AgentEntry to a registry.RegisteredAgent.
-func toRegisteredAgent(e *AgentEntry) *registry.RegisteredAgent {
-	return &registry.RegisteredAgent{
-		Alias:        e.Alias,
-		URL:          e.URL,
-		Headers:      e.Headers,
-		Card:         e.Card,
-		PingEndpoint: e.PingEndpoint,
-	}
 }
 
 // --- A2AClientResolver adapter ---

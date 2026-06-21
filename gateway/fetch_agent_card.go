@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 // fetchAgentCard attempts to fetch an AgentCard from <agentURL>/.well-known/agent-card.json.
@@ -17,7 +18,7 @@ func (s *Server) fetchAgentCard(ctx context.Context, agentURL string, headers ma
 
 	client := s.httpClient
 	if len(headers) > 0 {
-		entry := &AgentEntry{Headers: headers}
+		entry := &registry.RegisteredAgent{Headers: headers}
 		client = httpClientForAgent(s.httpClient, entry)
 	}
 
