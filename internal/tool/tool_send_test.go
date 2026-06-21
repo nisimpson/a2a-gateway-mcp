@@ -12,6 +12,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 func newSendTool(reg *mockRegistry, clientResolver *mockClientResolver) *SendMessageTool {
@@ -61,7 +62,7 @@ func TestSendMessage_MessageOrPartsRequired(t *testing.T) {
 
 func TestSendMessage_InvalidAgent(t *testing.T) {
 	reg := &mockRegistry{
-		ResolveAgentFn: func(identifier string) (*ResolveResult, error) {
+		ResolveAgentFn: func(identifier string) (*registry.ResolveResult, error) {
 			return nil, fmt.Errorf("agent not found")
 		},
 	}
@@ -115,13 +116,13 @@ func TestSendMessage_DirectPath_MessageResponse(t *testing.T) {
 	defer agent.Close()
 
 	reg := &mockRegistry{
-		ResolveAgentFn: func(identifier string) (*ResolveResult, error) {
-			return &ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
+		ResolveAgentFn: func(identifier string) (*registry.ResolveResult, error) {
+			return &registry.ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
 		},
 	}
 
 	clientResolver := &mockClientResolver{
-		ResolveFn: func(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error) {
+		ResolveFn: func(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error) {
 			return newTestClient(ctx, resolved.URL)
 		},
 	}
@@ -166,12 +167,12 @@ func TestSendMessage_DirectPath_TaskCompleted(t *testing.T) {
 	defer agent.Close()
 
 	reg := &mockRegistry{
-		ResolveAgentFn: func(identifier string) (*ResolveResult, error) {
-			return &ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
+		ResolveAgentFn: func(identifier string) (*registry.ResolveResult, error) {
+			return &registry.ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
 		},
 	}
 	clientResolver := &mockClientResolver{
-		ResolveFn: func(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error) {
+		ResolveFn: func(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error) {
 			return newTestClient(ctx, resolved.URL)
 		},
 	}
@@ -214,12 +215,12 @@ func TestSendMessage_DirectPath_TaskFailed(t *testing.T) {
 	defer agent.Close()
 
 	reg := &mockRegistry{
-		ResolveAgentFn: func(identifier string) (*ResolveResult, error) {
-			return &ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
+		ResolveAgentFn: func(identifier string) (*registry.ResolveResult, error) {
+			return &registry.ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
 		},
 	}
 	clientResolver := &mockClientResolver{
-		ResolveFn: func(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error) {
+		ResolveFn: func(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error) {
 			return newTestClient(ctx, resolved.URL)
 		},
 	}
@@ -266,12 +267,12 @@ func TestSendMessage_ContextStoreUsed(t *testing.T) {
 	defer agent.Close()
 
 	reg := &mockRegistry{
-		ResolveAgentFn: func(identifier string) (*ResolveResult, error) {
-			return &ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
+		ResolveAgentFn: func(identifier string) (*registry.ResolveResult, error) {
+			return &registry.ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
 		},
 	}
 	clientResolver := &mockClientResolver{
-		ResolveFn: func(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error) {
+		ResolveFn: func(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error) {
 			return newTestClient(ctx, resolved.URL)
 		},
 	}
@@ -302,12 +303,12 @@ func TestSendMessage_HealthRecordedOnSuccess(t *testing.T) {
 	defer agent.Close()
 
 	reg := &mockRegistry{
-		ResolveAgentFn: func(identifier string) (*ResolveResult, error) {
-			return &ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
+		ResolveAgentFn: func(identifier string) (*registry.ResolveResult, error) {
+			return &registry.ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
 		},
 	}
 	clientResolver := &mockClientResolver{
-		ResolveFn: func(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error) {
+		ResolveFn: func(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error) {
 			return newTestClient(ctx, resolved.URL)
 		},
 	}

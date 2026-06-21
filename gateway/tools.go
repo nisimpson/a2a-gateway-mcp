@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/nisimpson/a2a-gateway-mcp/history"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/tool"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/validate"
@@ -18,7 +17,7 @@ func (s *Server) registerToolsV2() {
 		HealthTracker:          s.healthTracker,
 		RateLimiter:            s.rateLimiters,
 		HistoryBackend:         s.historyBackendAdapter(),
-		A2AClientResolver:      s.clientResolverAdapter(),
+		A2AClientResolver:      s.clients,
 		CallerCardInjector:     s.callerCardInjectorAdapter(),
 		CallerCardStore:        s.callerCardStoreAdapter(),
 		ContextStore:           s.contextStore,
@@ -75,9 +74,9 @@ func (a *agentRegistryAdapter) SetCard(alias string, card *a2a.AgentCard) bool {
 	return a.registry.SetCard(alias, card)
 }
 
-func (a *agentRegistryAdapter) ResolveAgent(identifier string) (*tool.ResolveResult, error) {
+func (a *agentRegistryAdapter) ResolveAgent(identifier string) (*registry.ResolveResult, error) {
 	if entry := a.registry.Lookup(identifier); entry != nil {
-		return &tool.ResolveResult{
+		return &registry.ResolveResult{
 			URL:     entry.URL,
 			Headers: entry.Headers,
 			IsAlias: true,
@@ -86,7 +85,7 @@ func (a *agentRegistryAdapter) ResolveAgent(identifier string) (*tool.ResolveRes
 	}
 
 	if err := validate.URL(identifier); err == nil {
-		return &tool.ResolveResult{
+		return &registry.ResolveResult{
 			URL:     identifier,
 			Headers: nil,
 			IsAlias: false,
@@ -96,7 +95,7 @@ func (a *agentRegistryAdapter) ResolveAgent(identifier string) (*tool.ResolveRes
 	return nil, fmt.Errorf("agent alias not registered and identifier is not a valid URL")
 }
 
-func (a *agentRegistryAdapter) SupportsStreaming(resolved *tool.ResolveResult) bool {
+func (a *agentRegistryAdapter) SupportsStreaming(resolved *registry.ResolveResult) bool {
 	if !resolved.IsAlias {
 		return false
 	}
@@ -105,31 +104,6 @@ func (a *agentRegistryAdapter) SupportsStreaming(resolved *tool.ResolveResult) b
 		return false
 	}
 	return entry.Card.Capabilities.Streaming
-}
-
-// --- A2AClientResolver adapter ---
-
-func (s *Server) clientResolverAdapter() *a2aClientResolverAdapter {
-	return &a2aClientResolverAdapter{resolver: s.clients}
-}
-
-type a2aClientResolverAdapter struct {
-	resolver *clientResolver
-}
-
-func (a *a2aClientResolverAdapter) Evict(url string) {
-	a.resolver.Evict(url)
-}
-
-func (a *a2aClientResolverAdapter) Resolve(ctx context.Context, resolved *tool.ResolveResult) (*a2aclient.Client, error) {
-	// Convert tool.ResolveResult to gateway.ResolveResult for the underlying resolver.
-	gwResolved := &ResolveResult{
-		URL:     resolved.URL,
-		Headers: resolved.Headers,
-		IsAlias: resolved.IsAlias,
-		Alias:   resolved.Alias,
-	}
-	return a.resolver.Resolve(ctx, gwResolved)
 }
 
 // --- PingStrategy adapter ---

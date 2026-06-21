@@ -123,7 +123,7 @@ func TestBroadcast_SingleAgent_Success(t *testing.T) {
 	}
 
 	clientResolver := &mockClientResolver{
-		ResolveFn: func(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error) {
+		ResolveFn: func(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error) {
 			return newTestClient(ctx, resolved.URL)
 		},
 	}

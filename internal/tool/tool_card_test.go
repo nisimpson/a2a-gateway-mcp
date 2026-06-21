@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"testing"
+
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 func newGetAgentCardTool(reg *mockRegistry, httpClient *mockHTTPDoer) *GetAgentCardTool {
@@ -35,8 +37,8 @@ func TestGetAgentCard_EmptyAgent(t *testing.T) {
 
 func TestGetAgentCard_AgentUnreachable(t *testing.T) {
 	reg := &mockRegistry{
-		ResolveAgentFn: func(identifier string) (*ResolveResult, error) {
-			return &ResolveResult{URL: "http://unreachable.invalid", IsAlias: false}, nil
+		ResolveAgentFn: func(identifier string) (*registry.ResolveResult, error) {
+			return &registry.ResolveResult{URL: "http://unreachable.invalid", IsAlias: false}, nil
 		},
 	}
 	httpClient := &mockHTTPDoer{
@@ -65,8 +67,8 @@ func TestGetAgentCard_Success(t *testing.T) {
 	cardJSON := `{"name":"test-agent","description":"A test agent","url":"http://example.com"}`
 
 	reg := &mockRegistry{
-		ResolveAgentFn: func(identifier string) (*ResolveResult, error) {
-			return &ResolveResult{URL: "http://example.com", IsAlias: true, Alias: identifier}, nil
+		ResolveAgentFn: func(identifier string) (*registry.ResolveResult, error) {
+			return &registry.ResolveResult{URL: "http://example.com", IsAlias: true, Alias: identifier}, nil
 		},
 	}
 	httpClient := &mockHTTPDoer{
@@ -97,8 +99,8 @@ func TestGetAgentCard_Success(t *testing.T) {
 
 func TestGetAgentCard_InvalidJSON(t *testing.T) {
 	reg := &mockRegistry{
-		ResolveAgentFn: func(identifier string) (*ResolveResult, error) {
-			return &ResolveResult{URL: "http://example.com", IsAlias: false}, nil
+		ResolveAgentFn: func(identifier string) (*registry.ResolveResult, error) {
+			return &registry.ResolveResult{URL: "http://example.com", IsAlias: false}, nil
 		},
 	}
 	httpClient := &mockHTTPDoer{

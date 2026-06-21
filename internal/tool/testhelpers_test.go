@@ -21,8 +21,8 @@ type mockRegistry struct {
 	ConnectFn           func(alias, url string, headers map[string]string, pingEndpoint string) bool
 	DisconnectFn        func(alias string) *registry.RegisteredAgent
 	SetCardFn           func(alias string, card *a2a.AgentCard) bool
-	ResolveAgentFn      func(identifier string) (*ResolveResult, error)
-	SupportsStreamingFn func(resolved *ResolveResult) bool
+	ResolveAgentFn      func(identifier string) (*registry.ResolveResult, error)
+	SupportsStreamingFn func(resolved *registry.ResolveResult) bool
 }
 
 func (m *mockRegistry) Lookup(alias string) *registry.RegisteredAgent {
@@ -55,13 +55,13 @@ func (m *mockRegistry) SetCard(alias string, card *a2a.AgentCard) bool {
 	}
 	return false
 }
-func (m *mockRegistry) ResolveAgent(identifier string) (*ResolveResult, error) {
+func (m *mockRegistry) ResolveAgent(identifier string) (*registry.ResolveResult, error) {
 	if m.ResolveAgentFn != nil {
 		return m.ResolveAgentFn(identifier)
 	}
-	return &ResolveResult{URL: "http://example.com", IsAlias: true, Alias: identifier}, nil
+	return &registry.ResolveResult{URL: "http://example.com", IsAlias: true, Alias: identifier}, nil
 }
-func (m *mockRegistry) SupportsStreaming(resolved *ResolveResult) bool {
+func (m *mockRegistry) SupportsStreaming(resolved *registry.ResolveResult) bool {
 	if m.SupportsStreamingFn != nil {
 		return m.SupportsStreamingFn(resolved)
 	}
@@ -193,11 +193,11 @@ func (m *mockHistoryRecorder) Record(_ context.Context, input history.RecordInpu
 // --- Mock A2AClientResolver ---
 
 type mockClientResolver struct {
-	ResolveFn func(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error)
+	ResolveFn func(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error)
 	EvictFn   func(url string)
 }
 
-func (m *mockClientResolver) Resolve(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error) {
+func (m *mockClientResolver) Resolve(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error) {
 	if m.ResolveFn != nil {
 		return m.ResolveFn(ctx, resolved)
 	}

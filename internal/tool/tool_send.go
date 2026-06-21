@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nisimpson/a2a-gateway-mcp/health"
 	"github.com/nisimpson/a2a-gateway-mcp/history"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 // InputPart represents a single content part in a multi-part message.
@@ -103,7 +104,7 @@ func (s *SendMessageTool) Tool() *mcp.Tool {
 
 // sendRequest holds the validated and resolved parameters needed to send a message.
 type sendRequest struct {
-	resolved *ResolveResult
+	resolved *registry.ResolveResult
 	client   *a2aclient.Client
 	request  *a2a.SendMessageRequest
 }
@@ -230,7 +231,7 @@ func (s *SendMessageTool) processResponse(ctx context.Context, input *SendMessag
 }
 
 // recordHealthOutcome classifies an error and records health state.
-func (s *SendMessageTool) recordHealthOutcome(resolved *ResolveResult, err error) {
+func (s *SendMessageTool) recordHealthOutcome(resolved *registry.ResolveResult, err error) {
 	if !resolved.IsAlias {
 		return
 	}
@@ -365,7 +366,7 @@ const taskPollInterval = 2 * time.Second
 
 // handleTaskResult processes a *a2a.Task result from SendMessage, handling
 // all task states including polling for non-terminal states.
-func (s *SendMessageTool) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Client, task *a2a.Task, resolved *ResolveResult, agent string, pollTimeout time.Duration) (*mcp.CallToolResult, *SendMessageOutput, error) {
+func (s *SendMessageTool) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Client, task *a2a.Task, resolved *registry.ResolveResult, agent string, pollTimeout time.Duration) (*mcp.CallToolResult, *SendMessageOutput, error) {
 	switch task.Status.State {
 	case a2a.TaskStateCompleted:
 		if resolved.IsAlias && task.ContextID != "" {

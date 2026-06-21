@@ -9,6 +9,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 func newCancelTaskTool(reg *mockRegistry, clientResolver *mockClientResolver) *CancelTaskTool {
@@ -58,12 +59,12 @@ func TestCancelTask_Success(t *testing.T) {
 	defer agent.Close()
 
 	reg := &mockRegistry{
-		ResolveAgentFn: func(identifier string) (*ResolveResult, error) {
-			return &ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
+		ResolveAgentFn: func(identifier string) (*registry.ResolveResult, error) {
+			return &registry.ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
 		},
 	}
 	clientResolver := &mockClientResolver{
-		ResolveFn: func(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error) {
+		ResolveFn: func(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error) {
 			return newTestClient(ctx, resolved.URL)
 		},
 	}
@@ -102,12 +103,12 @@ func TestCancelTask_NotCancelable(t *testing.T) {
 	defer agent.Close()
 
 	reg := &mockRegistry{
-		ResolveAgentFn: func(identifier string) (*ResolveResult, error) {
-			return &ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
+		ResolveAgentFn: func(identifier string) (*registry.ResolveResult, error) {
+			return &registry.ResolveResult{URL: agent.URL, IsAlias: true, Alias: identifier}, nil
 		},
 	}
 	clientResolver := &mockClientResolver{
-		ResolveFn: func(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error) {
+		ResolveFn: func(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error) {
 			return newTestClient(ctx, resolved.URL)
 		},
 	}

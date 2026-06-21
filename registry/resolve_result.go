@@ -1,4 +1,4 @@
-package gateway
+package registry
 
 // ResolveResult contains the resolved agent information.
 type ResolveResult struct {

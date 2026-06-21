@@ -11,6 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nisimpson/a2a-gateway-mcp/health"
 	"github.com/nisimpson/a2a-gateway-mcp/history"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 const (
@@ -175,7 +176,7 @@ func (b *BroadcastMessageTool) broadcastToAgent(ctx context.Context, alias strin
 	defer cancel()
 
 	// Resolve SDK client.
-	resolved := &ResolveResult{URL: entry.URL, IsAlias: true, Headers: entry.Headers, Alias: alias}
+	resolved := &registry.ResolveResult{URL: entry.URL, IsAlias: true, Headers: entry.Headers, Alias: alias}
 	a2aClient, err := b.A2AClientResolver.Resolve(agentCtx, resolved)
 	if err != nil {
 		result := &broadcastResult{Status: "error", Error: fmt.Sprintf("failed to resolve client: %v", err)}

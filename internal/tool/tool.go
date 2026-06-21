@@ -66,14 +66,6 @@ func RegisterAll(srv *mcp.Server, env *Env) {
 // per-request timeout override in seconds.
 type EffectiveTimeoutFunc = func(requestSeconds *int) time.Duration
 
-// ResolveResult contains the resolved agent information.
-type ResolveResult struct {
-	URL     string
-	Headers map[string]string
-	IsAlias bool   // true if resolved from registry, false if raw URL
-	Alias   string // populated when IsAlias is true
-}
-
 // RateLimitConfig holds rate limit parameters.
 type RateLimitConfig struct {
 	RequestsPerSecond float64
@@ -102,10 +94,10 @@ type AgentRegistry interface {
 	SetCard(alias string, card *a2a.AgentCard) bool
 	// ResolveAgent resolves the given identifier to connection details for
 	// an agent. The identifier may be a registered alias or a raw URL.
-	ResolveAgent(identifier string) (*ResolveResult, error)
+	ResolveAgent(identifier string) (*registry.ResolveResult, error)
 	// SupportsStreaming returns true if the resolved agent has a stored AgentCard
 	// with Capabilities.Streaming set to true.
-	SupportsStreaming(resolved *ResolveResult) bool
+	SupportsStreaming(resolved *registry.ResolveResult) bool
 }
 
 // HealthTracker monitors the health status of resolved agents by
@@ -156,7 +148,7 @@ type A2AClientResolver interface {
 	// Evict removes the cached client associated with the given URL.
 	Evict(url string)
 	// Resolve returns an A2A client for the given resolved agent.
-	Resolve(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error)
+	Resolve(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error)
 }
 
 // CallerCardInjector injects the caller's agent card into outgoing request metadata.

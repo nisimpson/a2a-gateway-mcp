@@ -34,7 +34,7 @@ func newClientResolver(reg *registry.AgentRegistry, httpClient *http.Client) *cl
 // It uses a cached client if available, otherwise creates one from the
 // agent's stored AgentCard. Falls back to JSON-RPC with the agent's URL
 // when no card is available.
-func (r *clientResolver) Resolve(ctx context.Context, resolved *ResolveResult) (*a2aclient.Client, error) {
+func (r *clientResolver) Resolve(ctx context.Context, resolved *registry.ResolveResult) (*a2aclient.Client, error) {
 	// Check cache with read lock.
 	r.mu.RLock()
 	if client, ok := r.clients[resolved.URL]; ok {
@@ -81,7 +81,7 @@ func (r *clientResolver) Evict(url string) {
 
 // createClient creates an a2aclient.Client using the agent's card or
 // falling back to a JSON-RPC endpoint at the agent's URL.
-func (r *clientResolver) createClient(ctx context.Context, resolved *ResolveResult, card *a2a.AgentCard, httpClient *http.Client) (*a2aclient.Client, error) {
+func (r *clientResolver) createClient(ctx context.Context, resolved *registry.ResolveResult, card *a2a.AgentCard, httpClient *http.Client) (*a2aclient.Client, error) {
 	if card != nil && len(card.SupportedInterfaces) > 0 {
 		// Determine transport option based on the card's primary interface protocol.
 		var opts []a2aclient.FactoryOption
@@ -111,7 +111,7 @@ func (r *clientResolver) createClient(ctx context.Context, resolved *ResolveResu
 
 // findCard looks up the AgentCard for an alias-based resolution by
 // searching all registry entries for one matching the resolved URL.
-func (r *clientResolver) findCard(resolved *ResolveResult) *a2a.AgentCard {
+func (r *clientResolver) findCard(resolved *registry.ResolveResult) *a2a.AgentCard {
 	entries := r.registry.List()
 	for _, entry := range entries {
 		if entry.URL == resolved.URL && entry.Card != nil {
@@ -123,7 +123,7 @@ func (r *clientResolver) findCard(resolved *ResolveResult) *a2a.AgentCard {
 
 // httpClientForResolved returns an HTTP client with the agent's custom
 // headers injected via a headerRoundTripper.
-func (r *clientResolver) httpClientForResolved(resolved *ResolveResult) *http.Client {
+func (r *clientResolver) httpClientForResolved(resolved *registry.ResolveResult) *http.Client {
 	if len(resolved.Headers) == 0 {
 		return r.httpClient
 	}

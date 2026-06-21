@@ -16,6 +16,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/specification"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 // toolDescription constructs a tool description string by joining multiple lines
@@ -173,7 +174,7 @@ func handleStreamingMessage(
 	store ContextStore,
 	a2aClient *a2aclient.Client,
 	sendReq *a2a.SendMessageRequest,
-	resolved *ResolveResult,
+	resolved *registry.ResolveResult,
 	agent string,
 	timeout time.Duration,
 ) (*mcp.CallToolResult, *SendMessageOutput, error) {
