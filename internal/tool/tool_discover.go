@@ -44,7 +44,7 @@ func (d *DiscoverAgentsTool) Handle(ctx context.Context, _ *mcp.CallToolRequest,
 		return toolError("limit must be a positive integer (>= 1)"), nil, nil
 	}
 
-	if err := validate.ValidateHeaders(input.Headers); err != nil {
+	if err := validate.Headers(input.Headers); err != nil {
 		return toolError(err.Error()), nil, nil
 	}
 

@@ -109,8 +109,11 @@ type RateLimiter interface {
 
 // HistoryBackend defines the storage interface for interaction history.
 type HistoryBackend interface {
+	// List retrieves all history entries associated with the given agent alias.
 	List(ctx context.Context, alias string) ([]history.Entry, error)
+	// Clear removes all history entries for the given agent alias but retains the alias key.
 	Clear(ctx context.Context, alias string) error
+	// Delete removes the agent alias and all associated history entries entirely.
 	Delete(ctx context.Context, alias string) error
 }
 

@@ -31,7 +31,7 @@ func (d *DisconnectAgentTool) Tool() *mcp.Tool {
 }
 
 func (d *DisconnectAgentTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *DisconnectAgentInput) (*mcp.CallToolResult, any, error) {
-	if err := validate.ValidateAlias(input.Alias); err != nil {
+	if err := validate.Alias(input.Alias); err != nil {
 		return toolError(err.Error()), nil, nil
 	}
 

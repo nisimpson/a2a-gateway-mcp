@@ -277,3 +277,18 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) MCPServer() *mcp.Server {
 	return s.mcpServer
 }
+
+// effectivePollTimeout returns the poll timeout to use for a request.
+// Per-request PollTimeoutSeconds takes precedence over the server default.
+// A negative value means no timeout (wait indefinitely).
+func (s *Server) effectivePollTimeout(requestSeconds *int) time.Duration {
+	if requestSeconds != nil {
+		if *requestSeconds < 0 {
+			return 0 // sentinel: no timeout
+		}
+		if *requestSeconds > 0 {
+			return time.Duration(*requestSeconds) * time.Second
+		}
+	}
+	return s.pollTimeout
+}

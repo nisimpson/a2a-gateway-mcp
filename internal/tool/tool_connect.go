@@ -75,17 +75,17 @@ func (c *ConnectAgentTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, i
 }
 
 func (c *ConnectAgentTool) validateInput(input *ConnectAgentInput) error {
-	if err := validate.ValidateAlias(input.Alias); err != nil {
+	if err := validate.Alias(input.Alias); err != nil {
 		return err
 	}
 	if err := validate.URL(input.AgentURL); err != nil {
 		return err
 	}
-	if err := validate.ValidateHeaders(input.Headers); err != nil {
+	if err := validate.Headers(input.Headers); err != nil {
 		return err
 	}
 	if input.PingEndpoint != nil {
-		if err := validate.ValidatePingEndpoint(*input.PingEndpoint); err != nil {
+		if err := validate.PingEndpoint(*input.PingEndpoint); err != nil {
 			return err
 		}
 	}
