@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/internal/health"
 )
 
 func TestNewServer_EmptyRegistry(t *testing.T) {
@@ -167,12 +168,12 @@ func TestNewServer_DefaultHealthTracker(t *testing.T) {
 	srv.healthTracker.RecordFailure("test-agent")
 	srv.healthTracker.RecordFailure("test-agent")
 	state := srv.healthTracker.Get("test-agent")
-	if state.Status != HealthStatusUnknown {
+	if state.Status != health.HealthStatusUnknown {
 		t.Errorf("expected unknown after 2 failures (threshold=3), got %s", state.Status)
 	}
 	srv.healthTracker.RecordFailure("test-agent")
 	state = srv.healthTracker.Get("test-agent")
-	if state.Status != HealthStatusUnhealthy {
+	if state.Status != health.HealthStatusUnhealthy {
 		t.Errorf("expected unhealthy after 3 failures, got %s", state.Status)
 	}
 }
@@ -191,12 +192,12 @@ func TestWithHealthCheck_CustomThreshold(t *testing.T) {
 		srv.healthTracker.RecordFailure("agent")
 	}
 	state := srv.healthTracker.Get("agent")
-	if state.Status == HealthStatusUnhealthy {
+	if state.Status == health.HealthStatusUnhealthy {
 		t.Error("expected agent to still be non-unhealthy after 4 failures with threshold=5")
 	}
 	srv.healthTracker.RecordFailure("agent")
 	state = srv.healthTracker.Get("agent")
-	if state.Status != HealthStatusUnhealthy {
+	if state.Status != health.HealthStatusUnhealthy {
 		t.Errorf("expected unhealthy after 5 failures, got %s", state.Status)
 	}
 }

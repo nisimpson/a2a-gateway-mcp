@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/internal/health"
 )
 
 const (
@@ -168,7 +169,7 @@ type Server struct {
 	maxEntryLength int
 
 	// Health tracking — Requirements: HLTH-4.1, HLTH-4.2, HLTH-4.3, HLTH-4.4, HLTH-4.5
-	healthTracker *HealthTracker
+	healthTracker *health.HealthTracker
 	pingStrategy  PingStrategy
 }
 
@@ -248,7 +249,7 @@ func NewServer(opts ...Option) *Server {
 	if cfg.healthCheckConfigured {
 		threshold = max(cfg.healthFailureThreshold, 0)
 	}
-	s.healthTracker = NewHealthTracker(threshold)
+	s.healthTracker = health.NewHealthTracker(threshold)
 
 	// Configure ping strategy (default: HTTP GET to agent card endpoint).
 	// Uses the server's existing HTTP client — no new client allocation.
