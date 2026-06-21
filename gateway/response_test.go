@@ -32,8 +32,8 @@ func TestFormatTaskResponse_WithTextArtifacts(t *testing.T) {
 
 	result, _ := FormatTaskResponse(task)
 
-	if len(result.Content) != 2 {
-		t.Fatalf("expected 2 content items, got %d", len(result.Content))
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(result.Content))
 	}
 
 	textContent, ok := result.Content[0].(*mcp.TextContent)
@@ -43,14 +43,6 @@ func TestFormatTaskResponse_WithTextArtifacts(t *testing.T) {
 	expected := "Hello World\nSecond artifact"
 	if textContent.Text != expected {
 		t.Errorf("expected text %q, got %q", expected, textContent.Text)
-	}
-
-	ctxContent, ok := result.Content[1].(*mcp.TextContent)
-	if !ok {
-		t.Fatal("expected second content to be TextContent")
-	}
-	if ctxContent.Text != "context_id:ctx-123" {
-		t.Errorf("expected context_id content %q, got %q", "context_id:ctx-123", ctxContent.Text)
 	}
 }
 
@@ -145,8 +137,8 @@ func TestFormatTaskResponse_MixedParts(t *testing.T) {
 
 	result, _ := FormatTaskResponse(task)
 
-	if len(result.Content) != 2 {
-		t.Fatalf("expected 2 content items, got %d", len(result.Content))
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(result.Content))
 	}
 
 	textContent, ok := result.Content[0].(*mcp.TextContent)
@@ -432,44 +424,33 @@ func TestPropertyA2AResponseJSONRoundTrip(t *testing.T) {
 	properties.TestingRun(t)
 }
 
-// Feature: structured-responses, Property 2: Content array matches legacy output
+// Feature: structured-responses, Property 2: Content only contains response text
 // **Validates: Requirements SRES-1.4, SRES-2.3**
 
-// referenceFormatTaskResponse is the reference (legacy) implementation for FormatTaskResponse.
-// It computes the expected content items for a given task using the same logic
-// that existed before the signature change.
+// referenceFormatTaskResponse is the reference implementation for FormatTaskResponse.
+// It computes the expected content items: only the response text.
 func referenceFormatTaskResponse(task *a2a.Task) []*mcp.TextContent {
 	var items []*mcp.TextContent
 
 	text := extractContentFromArtifacts(task.Artifacts)
 	items = append(items, &mcp.TextContent{Text: text})
 
-	if task.ID != "" {
-		items = append(items, &mcp.TextContent{Text: "task_id:" + string(task.ID)})
-	}
-
-	if task.ContextID != "" {
-		items = append(items, &mcp.TextContent{Text: "context_id:" + task.ContextID})
-	}
-
 	return items
 }
 
-// referenceFormatMessageResponse is the reference (legacy) implementation for FormatMessageResponse.
+// referenceFormatMessageResponse is the reference implementation for FormatMessageResponse.
+// It computes the expected content items: only the response text.
 func referenceFormatMessageResponse(msg *a2a.Message) []*mcp.TextContent {
 	var items []*mcp.TextContent
 
 	text := extractContentFromMessageParts(msg.Parts)
 	items = append(items, &mcp.TextContent{Text: text})
 
-	if msg.ContextID != "" {
-		items = append(items, &mcp.TextContent{Text: "context_id:" + msg.ContextID})
-	}
-
 	return items
 }
 
-// referenceFormatInterruptedResponse is the reference (legacy) implementation for FormatInterruptedResponse.
+// referenceFormatInterruptedResponse is the reference implementation for FormatInterruptedResponse.
+// It computes the expected content items: response text + state indicator.
 func referenceFormatInterruptedResponse(task *a2a.Task, stateName string) []*mcp.TextContent {
 	var items []*mcp.TextContent
 
@@ -487,14 +468,6 @@ func referenceFormatInterruptedResponse(task *a2a.Task, stateName string) []*mcp
 	}
 
 	items = append(items, &mcp.TextContent{Text: "state:" + stateName})
-
-	if task.ID != "" {
-		items = append(items, &mcp.TextContent{Text: "task_id:" + string(task.ID)})
-	}
-
-	if task.ContextID != "" {
-		items = append(items, &mcp.TextContent{Text: "context_id:" + task.ContextID})
-	}
 
 	return items
 }
@@ -627,14 +600,14 @@ func genInterruptedTask() gopter.Gen {
 	})
 }
 
-func TestPropertyLegacyContentPreservation(t *testing.T) {
+func TestPropertyContentOnlyContainsResponseText(t *testing.T) {
 	parameters := gopter.DefaultTestParameters()
 	parameters.MinSuccessfulTests = 100
 
 	properties := gopter.NewProperties(parameters)
 
 	// Property 2a: FormatTaskResponse content matches reference
-	properties.Property("FormatTaskResponse content matches legacy reference", prop.ForAll(
+	properties.Property("FormatTaskResponse content only contains response text", prop.ForAll(
 		func(task *a2a.Task) bool {
 			result, _ := FormatTaskResponse(task)
 			expected := referenceFormatTaskResponse(task)
@@ -644,7 +617,7 @@ func TestPropertyLegacyContentPreservation(t *testing.T) {
 	))
 
 	// Property 2b: FormatMessageResponse content matches reference
-	properties.Property("FormatMessageResponse content matches legacy reference", prop.ForAll(
+	properties.Property("FormatMessageResponse content only contains response text", prop.ForAll(
 		func(msg *a2a.Message) bool {
 			result, _ := FormatMessageResponse(msg)
 			expected := referenceFormatMessageResponse(msg)
@@ -654,7 +627,7 @@ func TestPropertyLegacyContentPreservation(t *testing.T) {
 	))
 
 	// Property 2c: FormatInterruptedResponse content matches reference
-	properties.Property("FormatInterruptedResponse content matches legacy reference", prop.ForAll(
+	properties.Property("FormatInterruptedResponse content only contains response text and state", prop.ForAll(
 		func(task *a2a.Task) bool {
 			result, _ := FormatInterruptedResponse(task, "input-required")
 			expected := referenceFormatInterruptedResponse(task, "input-required")
@@ -664,7 +637,7 @@ func TestPropertyLegacyContentPreservation(t *testing.T) {
 	))
 
 	// Property 2d: FormatInputRequiredResponse content matches reference (delegates to FormatInterruptedResponse)
-	properties.Property("FormatInputRequiredResponse content matches legacy reference", prop.ForAll(
+	properties.Property("FormatInputRequiredResponse content only contains response text and state", prop.ForAll(
 		func(task *a2a.Task) bool {
 			result, _ := FormatInputRequiredResponse(task)
 			expected := referenceFormatInterruptedResponse(task, "input-required")
@@ -845,10 +818,11 @@ func TestFormatMessageResponse_WithContextID(t *testing.T) {
 	msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("reply"))
 	msg.ContextID = "ctx-test-1"
 
-	result, _ := FormatMessageResponse(msg)
+	result, structured := FormatMessageResponse(msg)
 
-	if len(result.Content) != 2 {
-		t.Fatalf("expected 2 content items, got %d", len(result.Content))
+	// Content should only have the response text (no context_id item).
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(result.Content))
 	}
 
 	textContent, ok := result.Content[0].(*mcp.TextContent)
@@ -859,12 +833,9 @@ func TestFormatMessageResponse_WithContextID(t *testing.T) {
 		t.Errorf("expected %q, got %q", "reply", textContent.Text)
 	}
 
-	ctxContent, ok := result.Content[1].(*mcp.TextContent)
-	if !ok {
-		t.Fatal("expected second content to be TextContent")
-	}
-	if ctxContent.Text != "context_id:ctx-test-1" {
-		t.Errorf("expected %q, got %q", "context_id:ctx-test-1", ctxContent.Text)
+	// Context ID should be available via structured response.
+	if structured.Message.ContextID != "ctx-test-1" {
+		t.Errorf("expected structured context_id %q, got %q", "ctx-test-1", structured.Message.ContextID)
 	}
 }
 

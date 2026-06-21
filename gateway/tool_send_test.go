@@ -239,7 +239,7 @@ func TestHandleSendMessage_CompletedTask(t *testing.T) {
 		t.Fatalf("expected success, got error: %v", result.Content)
 	}
 
-	// Should have text content + task_id content + context_id content
+	// Should have text content (response text only, no metadata items)
 	if len(result.Content) < 1 {
 		t.Fatalf("expected at least 1 content item, got %d", len(result.Content))
 	}
@@ -709,9 +709,10 @@ func TestHandleSendMessage_InputRequired_ReturnsImmediately(t *testing.T) {
 		t.Fatalf("expected success for input-required state, got error: %v", result.Content)
 	}
 
-	// Should contain: status message text, state indicator, task_id, context_id.
-	if len(result.Content) < 4 {
-		t.Fatalf("expected at least 4 content items, got %d", len(result.Content))
+	// Should contain: status message text and state indicator.
+	// Metadata (task_id, context_id) is in the structured response, not content.
+	if len(result.Content) < 2 {
+		t.Fatalf("expected at least 2 content items, got %d", len(result.Content))
 	}
 
 	// First: the agent's status message.
@@ -730,24 +731,6 @@ func TestHandleSendMessage_InputRequired_ReturnsImmediately(t *testing.T) {
 	}
 	if stateContent.Text != "state:input-required" {
 		t.Errorf("expected state indicator %q, got %q", "state:input-required", stateContent.Text)
-	}
-
-	// Third: task_id.
-	taskIDContent, ok := result.Content[2].(*mcp.TextContent)
-	if !ok {
-		t.Fatal("expected third content to be TextContent")
-	}
-	if taskIDContent.Text != "task_id:task-input-1" {
-		t.Errorf("expected task_id %q, got %q", "task_id:task-input-1", taskIDContent.Text)
-	}
-
-	// Fourth: context_id.
-	ctxContent, ok := result.Content[3].(*mcp.TextContent)
-	if !ok {
-		t.Fatal("expected fourth content to be TextContent")
-	}
-	if ctxContent.Text != "context_id:ctx-input-1" {
-		t.Errorf("expected context_id %q, got %q", "context_id:ctx-input-1", ctxContent.Text)
 	}
 
 	// Verify context store was updated.
@@ -1046,9 +1029,10 @@ func TestHandleSendMessage_AuthRequired_ReturnsImmediately(t *testing.T) {
 		t.Fatalf("expected success for auth-required state, got error: %v", result.Content)
 	}
 
-	// Should contain: status message text, state indicator, task_id, context_id.
-	if len(result.Content) < 4 {
-		t.Fatalf("expected at least 4 content items, got %d", len(result.Content))
+	// Should contain: status message text and state indicator.
+	// Metadata (task_id, context_id) is in the structured response, not content.
+	if len(result.Content) < 2 {
+		t.Fatalf("expected at least 2 content items, got %d", len(result.Content))
 	}
 
 	// First: the agent's status message.
@@ -1067,24 +1051,6 @@ func TestHandleSendMessage_AuthRequired_ReturnsImmediately(t *testing.T) {
 	}
 	if stateContent.Text != "state:auth-required" {
 		t.Errorf("expected state indicator %q, got %q", "state:auth-required", stateContent.Text)
-	}
-
-	// Third: task_id.
-	taskIDContent, ok := result.Content[2].(*mcp.TextContent)
-	if !ok {
-		t.Fatal("expected third content to be TextContent")
-	}
-	if taskIDContent.Text != "task_id:task-auth-1" {
-		t.Errorf("expected task_id %q, got %q", "task_id:task-auth-1", taskIDContent.Text)
-	}
-
-	// Fourth: context_id.
-	ctxContent, ok := result.Content[3].(*mcp.TextContent)
-	if !ok {
-		t.Fatal("expected fourth content to be TextContent")
-	}
-	if ctxContent.Text != "context_id:ctx-auth-1" {
-		t.Errorf("expected context_id %q, got %q", "context_id:ctx-auth-1", ctxContent.Text)
 	}
 
 	// Verify context store was updated.
@@ -1290,7 +1256,7 @@ func TestHandleSendMessage_MessageResponse_WithContextID(t *testing.T) {
 		Message: "hello",
 	}
 
-	result, _, err := srv.handleSendMessage(context.Background(), nil, input)
+	result, structured, err := srv.handleSendMessage(context.Background(), nil, input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1298,9 +1264,9 @@ func TestHandleSendMessage_MessageResponse_WithContextID(t *testing.T) {
 		t.Fatalf("expected success, got error: %v", result.Content)
 	}
 
-	// Should have 2 content items: text + context_id.
-	if len(result.Content) != 2 {
-		t.Fatalf("expected 2 content items, got %d", len(result.Content))
+	// Should have 1 content item: text only (no context_id metadata).
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(result.Content))
 	}
 
 	textContent, ok := result.Content[0].(*mcp.TextContent)
@@ -1311,12 +1277,13 @@ func TestHandleSendMessage_MessageResponse_WithContextID(t *testing.T) {
 		t.Errorf("expected %q, got %q", "reply with context", textContent.Text)
 	}
 
-	ctxContent, ok := result.Content[1].(*mcp.TextContent)
-	if !ok {
-		t.Fatal("expected second content to be TextContent")
+	// Context ID should be available via structured response.
+	if structured == nil {
+		t.Fatal("expected structured response")
 	}
-	if ctxContent.Text != "context_id:ctx-msg-1" {
-		t.Errorf("expected %q, got %q", "context_id:ctx-msg-1", ctxContent.Text)
+	resp := structured.(*SendMessageResponse)
+	if resp.Message.ContextID != "ctx-msg-1" {
+		t.Errorf("expected structured context_id %q, got %q", "ctx-msg-1", resp.Message.ContextID)
 	}
 
 	// Verify context store was updated.
@@ -1425,16 +1392,16 @@ func TestHandleSendMessage_MessageResponse_URLBased_NoContextStoreUpdate(t *test
 		t.Fatalf("expected success, got error: %v", result.Content)
 	}
 
-	// The response should still include the context_id content item.
-	if len(result.Content) != 2 {
-		t.Fatalf("expected 2 content items, got %d", len(result.Content))
+	// The response should only have the response text (no context_id metadata item).
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(result.Content))
 	}
-	ctxContent, ok := result.Content[1].(*mcp.TextContent)
+	textContent, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
-		t.Fatal("expected second content to be TextContent")
+		t.Fatal("expected first content to be TextContent")
 	}
-	if ctxContent.Text != "context_id:ctx-url-msg" {
-		t.Errorf("expected %q, got %q", "context_id:ctx-url-msg", ctxContent.Text)
+	if textContent.Text != "url response" {
+		t.Errorf("expected %q, got %q", "url response", textContent.Text)
 	}
 
 	// Context store should NOT have anything stored for the URL.

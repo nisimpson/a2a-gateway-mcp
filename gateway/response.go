@@ -42,22 +42,16 @@ func renderPart(part *a2a.Part) (string, bool) {
 // Behavior:
 //   - Renders all parts (Text, Data, URL, Raw) using renderPart, concatenated in order.
 //   - If the message has zero parts, returns empty text.
-//   - If the message has a ContextID, includes it as a "context_id:<id>" text
-//     content item.
+//   - Metadata (context_id) is available via the structured *SendMessageResponse;
+//     only human-readable response text is included in content.
 //
-// Content ordering: [response text, context_id]
+// Content ordering: [response text]
 func FormatMessageResponse(msg *a2a.Message) (*mcp.CallToolResult, *SendMessageResponse) {
 	// Requirement: SRES-2.1, SRES-2.2 — return raw message as structured content
 	result := &mcp.CallToolResult{}
 
 	text := extractContentFromMessageParts(msg.Parts)
 	result.Content = append(result.Content, &mcp.TextContent{Text: text})
-
-	if msg.ContextID != "" {
-		result.Content = append(result.Content, &mcp.TextContent{
-			Text: "context_id:" + msg.ContextID,
-		})
-	}
 
 	return result, &SendMessageResponse{Message: msg}
 }
@@ -81,12 +75,12 @@ func extractContentFromMessageParts(parts a2a.ContentParts) string {
 // *SendMessageResponse wrapping the task for use as structured content. It includes:
 //   - The agent's status message (explaining what input is needed), or
 //     artifact content if available.
-//   - A "state:<stateName>" indicator so callers can programmatically
-//     distinguish this from a completed response.
-//   - The task_id for referencing the task in subsequent operations.
-//   - The context_id for follow-up messages.
+//   - A "state:<stateName>" indicator so human readers can see the interrupted state.
 //
-// Content ordering: [response text, state indicator, task_id, context_id]
+// Metadata (task_id, context_id) is available via the structured *SendMessageResponse;
+// only human-readable content is included in the content array.
+//
+// Content ordering: [response text, state indicator]
 func FormatInterruptedResponse(task *a2a.Task, stateName string) (*mcp.CallToolResult, *SendMessageResponse) {
 	// Requirement: SRES-3.1, SRES-3.2 — structured content for interrupted states
 	result := &mcp.CallToolResult{}
@@ -111,19 +105,6 @@ func FormatInterruptedResponse(task *a2a.Task, stateName string) (*mcp.CallToolR
 		Text: "state:" + stateName,
 	})
 
-	// Include task_id when non-empty so callers can reference this task.
-	if task.ID != "" {
-		result.Content = append(result.Content, &mcp.TextContent{
-			Text: "task_id:" + string(task.ID),
-		})
-	}
-
-	if task.ContextID != "" {
-		result.Content = append(result.Content, &mcp.TextContent{
-			Text: "context_id:" + task.ContextID,
-		})
-	}
-
 	return result, &SendMessageResponse{Task: task}
 }
 
@@ -145,30 +126,16 @@ func FormatInputRequiredResponse(task *a2a.Task) (*mcp.CallToolResult, *SendMess
 //   - Parts within the same artifact are concatenated with no separator.
 //   - Content from different artifacts is separated by newline.
 //   - If the task has no artifacts or artifacts with no parts, returns empty text.
-//   - If the task has a non-empty ID, includes it as a "task_id:<id>" text content item.
-//   - If the task has a ContextID, includes it as a separate text content item
-//     prefixed with "context_id:".
+//   - Metadata (task_id, context_id) is available via the structured *SendMessageResponse;
+//     only human-readable response text is included in content.
 //
-// Content ordering: [response text, task_id, context_id]
+// Content ordering: [response text]
 func FormatTaskResponse(task *a2a.Task) (*mcp.CallToolResult, *SendMessageResponse) {
 	// Requirement: SRES-1.1, SRES-1.3, SRES-6.3 — return raw task as structured content
 	result := &mcp.CallToolResult{}
 
 	text := extractContentFromArtifacts(task.Artifacts)
 	result.Content = append(result.Content, &mcp.TextContent{Text: text})
-
-	// Include task_id when non-empty so callers can reference this task.
-	if task.ID != "" {
-		result.Content = append(result.Content, &mcp.TextContent{
-			Text: "task_id:" + string(task.ID),
-		})
-	}
-
-	if task.ContextID != "" {
-		result.Content = append(result.Content, &mcp.TextContent{
-			Text: "context_id:" + task.ContextID,
-		})
-	}
 
 	return result, &SendMessageResponse{Task: task}
 }

@@ -51,9 +51,9 @@ func TestHandleGetTask_CompletedTask(t *testing.T) {
 		t.Fatalf("expected success, got error: %v", result.Content)
 	}
 
-	// Should have text content + task_id + context_id.
-	if len(result.Content) < 3 {
-		t.Fatalf("expected at least 3 content items, got %d", len(result.Content))
+	// Should have text content only (metadata is in structured response).
+	if len(result.Content) < 1 {
+		t.Fatalf("expected at least 1 content item, got %d", len(result.Content))
 	}
 
 	textContent, ok := result.Content[0].(*mcp.TextContent)
@@ -62,24 +62,6 @@ func TestHandleGetTask_CompletedTask(t *testing.T) {
 	}
 	if textContent.Text != "Hello from completed task" {
 		t.Errorf("expected %q, got %q", "Hello from completed task", textContent.Text)
-	}
-
-	// Verify task_id is included.
-	taskIDContent, ok := result.Content[1].(*mcp.TextContent)
-	if !ok {
-		t.Fatal("expected second content to be TextContent")
-	}
-	if taskIDContent.Text != "task_id:task-123" {
-		t.Errorf("expected %q, got %q", "task_id:task-123", taskIDContent.Text)
-	}
-
-	// Verify context_id is included.
-	ctxContent, ok := result.Content[2].(*mcp.TextContent)
-	if !ok {
-		t.Fatal("expected third content to be TextContent")
-	}
-	if ctxContent.Text != "context_id:ctx-123" {
-		t.Errorf("expected %q, got %q", "context_id:ctx-123", ctxContent.Text)
 	}
 }
 
@@ -151,9 +133,9 @@ func TestHandleGetTask_InputRequired(t *testing.T) {
 		t.Fatal("expected success for input-required state")
 	}
 
-	// Should have: status message, state indicator, task_id, context_id.
-	if len(result.Content) < 4 {
-		t.Fatalf("expected at least 4 content items, got %d", len(result.Content))
+	// Should have: status message and state indicator.
+	if len(result.Content) < 2 {
+		t.Fatalf("expected at least 2 content items, got %d", len(result.Content))
 	}
 
 	textContent, ok := result.Content[0].(*mcp.TextContent)
@@ -170,22 +152,6 @@ func TestHandleGetTask_InputRequired(t *testing.T) {
 	}
 	if stateContent.Text != "state:input-required" {
 		t.Errorf("expected %q, got %q", "state:input-required", stateContent.Text)
-	}
-
-	taskIDContent, ok := result.Content[2].(*mcp.TextContent)
-	if !ok {
-		t.Fatal("expected third content to be TextContent")
-	}
-	if taskIDContent.Text != "task_id:task-789" {
-		t.Errorf("expected %q, got %q", "task_id:task-789", taskIDContent.Text)
-	}
-
-	ctxContent, ok := result.Content[3].(*mcp.TextContent)
-	if !ok {
-		t.Fatal("expected fourth content to be TextContent")
-	}
-	if ctxContent.Text != "context_id:ctx-789" {
-		t.Errorf("expected %q, got %q", "context_id:ctx-789", ctxContent.Text)
 	}
 }
 
@@ -358,9 +324,9 @@ func TestHandleGetTask_AuthRequired(t *testing.T) {
 		t.Fatal("expected success for auth-required state")
 	}
 
-	// Should have: status message, state indicator, task_id, context_id.
-	if len(result.Content) < 4 {
-		t.Fatalf("expected at least 4 content items, got %d", len(result.Content))
+	// Should have: status message and state indicator.
+	if len(result.Content) < 2 {
+		t.Fatalf("expected at least 2 content items, got %d", len(result.Content))
 	}
 
 	textContent, ok := result.Content[0].(*mcp.TextContent)
@@ -407,17 +373,9 @@ func TestHandleGetTask_WorkingState(t *testing.T) {
 		t.Fatal("expected success for working state")
 	}
 
-	// Should include task_id.
-	found := false
-	for _, c := range result.Content {
-		tc, ok := c.(*mcp.TextContent)
-		if ok && tc.Text == "task_id:task-working" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected task_id:task-working in content")
+	// Content should have the response text (empty since no artifacts).
+	if len(result.Content) < 1 {
+		t.Fatalf("expected at least 1 content item, got %d", len(result.Content))
 	}
 }
 

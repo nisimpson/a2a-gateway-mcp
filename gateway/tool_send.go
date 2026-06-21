@@ -13,30 +13,25 @@ import (
 )
 
 // extractResultText extracts the primary response text from a CallToolResult.
-// It returns the text from the first TextContent item, skipping metadata
-// prefixes (context_id:, task_id:, state:).
+// It returns the text from the first TextContent item (which is always the
+// human-readable response text now that metadata items have been removed).
 func extractResultText(result *mcp.CallToolResult) string {
 	if result == nil {
 		return ""
 	}
-	var parts []string
 	for _, content := range result.Content {
 		tc, ok := content.(*mcp.TextContent)
 		if !ok {
 			continue
 		}
-		// Skip metadata content items.
-		if strings.HasPrefix(tc.Text, "context_id:") ||
-			strings.HasPrefix(tc.Text, "task_id:") ||
-			strings.HasPrefix(tc.Text, "state:") {
-			continue
-		}
-		parts = append(parts, tc.Text)
+		return tc.Text
 	}
-	return strings.Join(parts, "\n")
+	return ""
 }
 
-// extractResultContextID extracts the context_id from a CallToolResult's content items.
+// Deprecated: extractResultContextID extracts the context_id from a CallToolResult's content items.
+// This function is kept for backward compatibility with tool_broadcast.go's recordBroadcastHistory.
+// Prefer extractResponseContextID for new code paths that have access to *SendMessageResponse.
 func extractResultContextID(result *mcp.CallToolResult) string {
 	if result == nil {
 		return ""
@@ -53,7 +48,9 @@ func extractResultContextID(result *mcp.CallToolResult) string {
 	return ""
 }
 
-// extractResultTaskID extracts the task_id from a CallToolResult's content items.
+// Deprecated: extractResultTaskID extracts the task_id from a CallToolResult's content items.
+// This function is kept for backward compatibility with tool_broadcast.go's recordBroadcastHistory.
+// Prefer extractResponseTaskID for new code paths that have access to *SendMessageResponse.
 func extractResultTaskID(result *mcp.CallToolResult) string {
 	if result == nil {
 		return ""
@@ -66,6 +63,33 @@ func extractResultTaskID(result *mcp.CallToolResult) string {
 		if v, found := strings.CutPrefix(tc.Text, "task_id:"); found {
 			return v
 		}
+	}
+	return ""
+}
+
+// extractResponseContextID extracts the context_id from a *SendMessageResponse.
+// It checks the Task and Message fields for a non-empty ContextID.
+func extractResponseContextID(resp *SendMessageResponse) string {
+	if resp == nil {
+		return ""
+	}
+	if resp.Task != nil {
+		return resp.Task.ContextID
+	}
+	if resp.Message != nil {
+		return resp.Message.ContextID
+	}
+	return ""
+}
+
+// extractResponseTaskID extracts the task_id from a *SendMessageResponse.
+// Only tasks have IDs; messages do not.
+func extractResponseTaskID(resp *SendMessageResponse) string {
+	if resp == nil {
+		return ""
+	}
+	if resp.Task != nil {
+		return string(resp.Task.ID)
 	}
 	return ""
 }
@@ -249,14 +273,14 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 				// On OutcomeContextCanceled: do not update health state (HLTH-8.3).
 			}
 			errResult := handleA2AError(err)
-			s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(errResult), extractResultContextID(errResult), extractResultTaskID(errResult), errResult.IsError)
+			s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(errResult), "", "", errResult.IsError)
 			return errResult, nil, nil
 		}
 		// Requirement: HLTH-1.2 — record success on any HTTP response.
 		if resolved.IsAlias {
 			s.healthTracker.RecordSuccess(resolved.Alias)
 		}
-		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(result), extractResultContextID(result), extractResultTaskID(result), result.IsError)
+		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(result), extractResponseContextID(structured), extractResponseTaskID(structured), result.IsError)
 		return result, structured, nil
 	}
 
@@ -272,7 +296,7 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 			// On OutcomeContextCanceled: do not update health state (HLTH-8.3).
 		}
 		errResult := handleA2AError(err)
-		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(errResult), extractResultContextID(errResult), extractResultTaskID(errResult), errResult.IsError)
+		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(errResult), "", "", errResult.IsError)
 		return errResult, nil, nil
 	}
 
@@ -285,7 +309,7 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 	switch v := result.(type) {
 	case *a2a.Task:
 		taskResult, meta, taskErr := s.handleTaskResult(ctx, a2aClient, v, resolved, input.Agent, s.effectivePollTimeout(input.PollTimeoutSeconds))
-		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(taskResult), extractResultContextID(taskResult), extractResultTaskID(taskResult), taskResult.IsError)
+		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(taskResult), extractResponseContextID(meta), extractResponseTaskID(meta), taskResult.IsError)
 		return taskResult, meta, taskErr
 	case *a2a.Message:
 		// Store context_id if alias-based.
@@ -293,14 +317,14 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 			s.contextStore.Set(input.Agent, v.ContextID)
 		}
 		msgResult, structured := FormatMessageResponse(v)
-		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(msgResult), extractResultContextID(msgResult), extractResultTaskID(msgResult), msgResult.IsError)
+		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(msgResult), extractResponseContextID(structured), extractResponseTaskID(structured), msgResult.IsError)
 		return msgResult, structured, nil
 	default:
 		defaultResult := &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{&mcp.TextContent{Text: "unrecognized response format: expected Task or Message"}},
 		}
-		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(defaultResult), extractResultContextID(defaultResult), extractResultTaskID(defaultResult), defaultResult.IsError)
+		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(defaultResult), "", "", defaultResult.IsError)
 		return defaultResult, nil, nil
 	}
 }
