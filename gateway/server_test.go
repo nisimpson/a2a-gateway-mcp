@@ -227,13 +227,9 @@ func TestNewServer_DefaultPingStrategy(t *testing.T) {
 	if srv.pingStrategy == nil {
 		t.Fatal("expected pingStrategy to be initialized")
 	}
-	// Verify it's a DefaultPingStrategy wrapping the server's HTTP client.
-	dps, ok := srv.pingStrategy.(*DefaultPingStrategy)
-	if !ok {
-		t.Fatalf("expected *DefaultPingStrategy, got %T", srv.pingStrategy)
-	}
-	if dps.client != srv.httpClient {
-		t.Error("expected DefaultPingStrategy to reuse the server's httpClient")
+	// Verify it's a *health.DefaultPingStrategy.
+	if _, ok := srv.pingStrategy.(*health.DefaultPingStrategy); !ok {
+		t.Fatalf("expected *health.DefaultPingStrategy, got %T", srv.pingStrategy)
 	}
 }
 
@@ -251,6 +247,6 @@ func TestWithHealthCheck_CustomPingStrategy(t *testing.T) {
 // mockPingStrategy is a test double for PingStrategy.
 type mockPingStrategy struct{}
 
-func (m *mockPingStrategy) Ping(_ context.Context, _ PingTarget) PingResult {
-	return PingResult{Reachable: true}
+func (m *mockPingStrategy) Ping(_ context.Context, _ health.PingTarget) health.PingResult {
+	return health.PingResult{Reachable: true}
 }

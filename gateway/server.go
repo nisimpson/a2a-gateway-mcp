@@ -29,7 +29,7 @@ type HealthCheckOptions struct {
 	// PingStrategy is the strategy used for on-demand liveness checks via
 	// the ping_agent tool. If nil, DefaultPingStrategy (HTTP GET to agent
 	// card endpoint) is used.
-	PingStrategy PingStrategy
+	PingStrategy health.PingStrategy
 }
 
 // HistoryOptions configures the history subsystem. Pass to WithHistory().
@@ -64,7 +64,7 @@ type serverConfig struct {
 	// Health check configuration
 	healthCheckConfigured  bool // true when WithHealthCheck was called
 	healthFailureThreshold int
-	healthPingStrategy     PingStrategy
+	healthPingStrategy     health.PingStrategy
 
 	// History configuration
 	historyConfigured bool // true when WithHistory was called
@@ -149,9 +149,9 @@ func WithHealthCheck(opts HealthCheckOptions) Option {
 type Server struct {
 	mcpServer     *mcp.Server
 	registry      *registry.AgentRegistry
-	contextStore  *ContextStore
+	contextStore  *registry.ContextStore
 	httpClient    *http.Client
-	clients       *clientResolver
+	clients       *registry.ClientResolver
 	pollTimeout   time.Duration
 	streamTimeout time.Duration
 
@@ -172,7 +172,7 @@ type Server struct {
 
 	// Health tracking — Requirements: HLTH-4.1, HLTH-4.2, HLTH-4.3, HLTH-4.4, HLTH-4.5
 	healthTracker *health.HealthTracker
-	pingStrategy  PingStrategy
+	pingStrategy  health.PingStrategy
 }
 
 // NewServer creates a new gateway server with the given options.
@@ -197,7 +197,7 @@ func NewServer(opts ...Option) *Server {
 	s := &Server{
 		mcpServer:     mcpServer,
 		registry:      registry.NewAgentRegistry(),
-		contextStore:  NewContextStore(),
+		contextStore:  registry.NewContextStore(),
 		httpClient:    cfg.httpClient,
 		pollTimeout:   cfg.pollTimeout,
 		streamTimeout: cfg.streamTimeout,
@@ -244,7 +244,7 @@ func NewServer(opts ...Option) *Server {
 		s.historyBackend = history.NewMemoryBackend(50)
 	}
 
-	s.clients = newClientResolver(s.registry, s.httpClient)
+	s.clients = registry.NewClientResolver(s.registry, s.httpClient)
 
 	// Configure health tracking subsystem — Requirements: HLTH-4.1, HLTH-4.3, HLTH-4.4
 	threshold := 3
@@ -258,7 +258,7 @@ func NewServer(opts ...Option) *Server {
 	if cfg.healthPingStrategy != nil {
 		s.pingStrategy = cfg.healthPingStrategy
 	} else {
-		s.pingStrategy = NewDefaultPingStrategy(s.httpClient)
+		s.pingStrategy = health.NewDefaultPingStrategy(s.httpClient)
 	}
 
 	s.registerToolsV2()

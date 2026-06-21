@@ -1,10 +1,8 @@
-package gateway
+package registry
 
 import (
 	"net/http"
 	"strings"
-
-	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 // headerRoundTripper wraps an http.RoundTripper and injects static headers
@@ -17,10 +15,8 @@ type headerRoundTripper struct {
 // RoundTrip clones the request, injects static headers (skipping protocol-reserved
 // headers), and delegates to the base RoundTripper.
 func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Clone the request to avoid mutating the original.
 	clone := req.Clone(req.Context())
 	for k, v := range h.headers {
-		// Skip protocol-required headers.
 		if isProtocolHeader(k) {
 			continue
 		}
@@ -35,10 +31,10 @@ func isProtocolHeader(name string) bool {
 	return strings.EqualFold(name, "Content-Type") || strings.EqualFold(name, "Accept")
 }
 
-// httpClientForAgent returns an *http.Client configured with the agent's
+// HTTPClientForAgent returns an *http.Client configured with the agent's
 // static headers composed on top of the given base http.Client.
 // If the entry has no headers, the base client is returned as-is.
-func httpClientForAgent(base *http.Client, entry *registry.RegisteredAgent) *http.Client {
+func HTTPClientForAgent(base *http.Client, entry *RegisteredAgent) *http.Client {
 	if len(entry.Headers) == 0 {
 		return base
 	}

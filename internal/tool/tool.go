@@ -8,6 +8,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/health"
 	"github.com/nisimpson/a2a-gateway-mcp/history"
 	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
@@ -184,24 +185,16 @@ type HTTPDoer interface {
 }
 
 // PingTarget holds the information needed to ping a single agent.
-type PingTarget struct {
-	Alias        string
-	URL          string
-	Headers      map[string]string
-	PingEndpoint string
-}
+// Alias for health.PingTarget to avoid breaking the tool package API.
+type PingTarget = health.PingTarget
 
 // PingResult holds the outcome of a ping operation.
-type PingResult struct {
-	Reachable    bool
-	ResponseTime time.Duration
-	Err          error
-}
+// Alias for health.PingResult to avoid breaking the tool package API.
+type PingResult = health.PingResult
 
 // PingStrategy defines how liveness checks are performed.
-type PingStrategy interface {
-	Ping(ctx context.Context, target PingTarget) PingResult
-}
+// Alias for health.PingStrategy to avoid breaking the tool package API.
+type PingStrategy = health.PingStrategy
 
 // CallerCardStore manages the stored caller card state.
 type CallerCardStore interface {

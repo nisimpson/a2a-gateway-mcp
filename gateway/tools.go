@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/nisimpson/a2a-gateway-mcp/history"
@@ -24,7 +25,7 @@ func (s *Server) registerToolsV2() {
 		HistoryRecorder:        s.historyRecorderAdapter(),
 		AgentCardFetcher:       s.agentCardFetcherAdapter(),
 		HTTPDoer:               s.httpClient,
-		PingStrategy:           s.pingStrategyAdapter(),
+		PingStrategy:           s.pingStrategy,
 		EffectivePollTimeout:   s.effectivePollTimeout,
 		EffectiveStreamTimeout: s.effectiveStreamTimeout,
 		DefaultRateLimit:       s.toolDefaultRateLimit(),
@@ -104,31 +105,6 @@ func (a *agentRegistryAdapter) SupportsStreaming(resolved *registry.ResolveResul
 		return false
 	}
 	return entry.Card.Capabilities.Streaming
-}
-
-// --- PingStrategy adapter ---
-
-func (s *Server) pingStrategyAdapter() *pingStrategyAdapter {
-	return &pingStrategyAdapter{strategy: s.pingStrategy}
-}
-
-type pingStrategyAdapter struct {
-	strategy PingStrategy
-}
-
-func (a *pingStrategyAdapter) Ping(ctx context.Context, target tool.PingTarget) tool.PingResult {
-	gwTarget := PingTarget{
-		Alias:        target.Alias,
-		URL:          target.URL,
-		Headers:      target.Headers,
-		PingEndpoint: target.PingEndpoint,
-	}
-	gwResult := a.strategy.Ping(ctx, gwTarget)
-	return tool.PingResult{
-		Reachable:    gwResult.Reachable,
-		ResponseTime: gwResult.ResponseTime,
-		Err:          gwResult.Err,
-	}
 }
 
 // --- CallerCardInjector adapter ---
@@ -220,13 +196,13 @@ func (s *Server) historyRecorderAdapter() *history.Recorder {
 // --- AgentCardFetcher adapter ---
 
 func (s *Server) agentCardFetcherAdapter() *agentCardFetcherAdapter {
-	return &agentCardFetcherAdapter{server: s}
+	return &agentCardFetcherAdapter{httpClient: s.httpClient}
 }
 
 type agentCardFetcherAdapter struct {
-	server *Server
+	httpClient *http.Client
 }
 
 func (a *agentCardFetcherAdapter) FetchAgentCard(ctx context.Context, agentURL string, headers map[string]string) *a2a.AgentCard {
-	return a.server.fetchAgentCard(ctx, agentURL, headers)
+	return registry.FetchAgentCard(ctx, a.httpClient, agentURL, headers)
 }

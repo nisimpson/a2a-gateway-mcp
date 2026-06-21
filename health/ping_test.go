@@ -1,4 +1,4 @@
-package gateway
+package health
 
 import (
 	"context"

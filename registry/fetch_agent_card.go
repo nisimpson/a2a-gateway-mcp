@@ -1,4 +1,4 @@
-package gateway
+package registry
 
 import (
 	"context"
@@ -8,18 +8,17 @@ import (
 	"strings"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
-// fetchAgentCard attempts to fetch an AgentCard from <agentURL>/.well-known/agent-card.json.
+// FetchAgentCard attempts to fetch an AgentCard from <agentURL>/.well-known/agent-card.json.
 // Returns nil if the fetch fails for any reason (network error, non-200, invalid JSON).
-func (s *Server) fetchAgentCard(ctx context.Context, agentURL string, headers map[string]string) *a2a.AgentCard {
+func FetchAgentCard(ctx context.Context, httpClient *http.Client, agentURL string, headers map[string]string) *a2a.AgentCard {
 	cardURL := strings.TrimRight(agentURL, "/") + "/.well-known/agent-card.json"
 
-	client := s.httpClient
+	client := httpClient
 	if len(headers) > 0 {
-		entry := &registry.RegisteredAgent{Headers: headers}
-		client = httpClientForAgent(s.httpClient, entry)
+		entry := &RegisteredAgent{Headers: headers}
+		client = HTTPClientForAgent(httpClient, entry)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cardURL, nil)
