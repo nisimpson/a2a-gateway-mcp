@@ -76,7 +76,7 @@ func TestList_WithAgents(t *testing.T) {
 		t.Fatalf("expected TextContent, got %T", result.Content[0])
 	}
 
-	var entries []listAgentEntry
+	var entries []ListAgentEntry
 	if err := json.Unmarshal([]byte(tc.Text), &entries); err != nil {
 		t.Fatalf("failed to unmarshal list response: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestList_UnhealthyShowsFailures(t *testing.T) {
 		t.Fatalf("expected TextContent, got %T", result.Content[0])
 	}
 
-	var entries []listAgentEntry
+	var entries []ListAgentEntry
 	if err := json.Unmarshal([]byte(tc.Text), &entries); err != nil {
 		t.Fatalf("failed to unmarshal list response: %v", err)
 	}

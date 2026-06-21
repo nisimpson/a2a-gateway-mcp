@@ -8,6 +8,11 @@ import (
 	"github.com/nisimpson/a2a-gateway-mcp/internal/validate"
 )
 
+// ConnectAgentOutput is the output schema for the connect_agent tool.
+type ConnectAgentOutput struct {
+	Message string `json:"message" jsonschema:"confirmation message indicating successful connection"`
+}
+
 // ConnectAgentInput is the input schema for the connect_agent tool.
 type ConnectAgentInput struct {
 	Alias          string            `json:"alias" jsonschema:"short alias for the agent (lowercase alphanumeric and hyphens only, max 64 chars)"`
@@ -26,7 +31,18 @@ type ConnectAgentTool struct {
 	RateLimiter       RateLimiter
 	HealthTracker     HealthTracker
 	CardFetcher       AgentCardFetcher
-	DefaultRateLimit  *RateLimitConfig
+	DefaultRateLimit  RateLimitConfig
+}
+
+func NewConnectAgentTool(env *Env) *ConnectAgentTool {
+	return &ConnectAgentTool{
+		AgentRegistry:     env.AgentRegistry,
+		A2AClientResolver: env.A2AClientResolver,
+		ContextStore:      env.ContextStore,
+		RateLimiter:       env.RateLimiter,
+		HealthTracker:     env.HealthTracker,
+		CardFetcher:       env.AgentCardFetcher,
+	}
 }
 
 func (c *ConnectAgentTool) Tool() *mcp.Tool {
@@ -36,9 +52,9 @@ func (c *ConnectAgentTool) Tool() *mcp.Tool {
 	}
 }
 
-func (c *ConnectAgentTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *ConnectAgentInput) (*mcp.CallToolResult, any, error) {
+func (c *ConnectAgentTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *ConnectAgentInput) (*mcp.CallToolResult, *ConnectAgentOutput, error) {
 	if err := c.validateInput(input); err != nil {
-		return toolError(err.Error()), nil, nil
+		return nil, nil, err
 	}
 
 	// Check if alias already exists; evict cached client and clear context if URL changed.
@@ -67,11 +83,10 @@ func (c *ConnectAgentTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, i
 	// Initialize health state.
 	c.HealthTracker.Reset(input.Alias)
 
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{
-			Text: fmt.Sprintf("Connected agent %q at %s", input.Alias, input.AgentURL),
-		}},
-	}, nil, nil
+	output := &ConnectAgentOutput{
+		Message: fmt.Sprintf("Connected agent %q at %s", input.Alias, input.AgentURL),
+	}
+	return nil, output, nil
 }
 
 func (c *ConnectAgentTool) validateInput(input *ConnectAgentInput) error {
@@ -109,7 +124,7 @@ func (c *ConnectAgentTool) configureRateLimit(input *ConnectAgentInput) {
 		} else {
 			c.RateLimiter.Set(input.Alias, cfg.RequestsPerSecond, cfg.Burst)
 		}
-	} else if c.DefaultRateLimit != nil && !c.DefaultRateLimit.IsDisabled() {
+	} else if !c.DefaultRateLimit.IsDisabled() {
 		c.RateLimiter.Set(input.Alias, c.DefaultRateLimit.RequestsPerSecond, c.DefaultRateLimit.Burst)
 	}
 }

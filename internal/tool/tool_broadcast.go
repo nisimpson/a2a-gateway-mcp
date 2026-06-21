@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -39,6 +38,19 @@ type BroadcastMessageTool struct {
 	RateLimiter        RateLimiter
 }
 
+// NewBroadcastMessageTool creates a new BroadcastMessageTool with dependencies
+// resolved from the provided environment.
+func NewBroadcastMessageTool(env *Env) *BroadcastMessageTool {
+	return &BroadcastMessageTool{
+		AgentRegistry:      env.AgentRegistry,
+		A2AClientResolver:  env.A2AClientResolver,
+		CallerCardInjector: env.CallerCardInjector,
+		HealthTracker:      env.HealthTracker,
+		HistoryRecorder:    env.HistoryRecorder,
+		RateLimiter:        env.RateLimiter,
+	}
+}
+
 func (b *BroadcastMessageTool) Tool() *mcp.Tool {
 	return &mcp.Tool{
 		Name: "broadcast_message",
@@ -52,14 +64,14 @@ func (b *BroadcastMessageTool) Tool() *mcp.Tool {
 	}
 }
 
-func (b *BroadcastMessageTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *BroadcastMessageInput) (*mcp.CallToolResult, any, error) {
+func (b *BroadcastMessageTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *BroadcastMessageInput) (*mcp.CallToolResult, map[string]*SendMessageOutput, error) {
 	if err := b.validateInput(input); err != nil {
-		return toolError(err.Error()), nil, nil
+		return nil, nil, err
 	}
 
 	timeoutSeconds, err := b.resolveTimeout(input.TimeoutSeconds)
 	if err != nil {
-		return toolError(err.Error()), nil, nil
+		return nil, nil, err
 	}
 
 	outcomes := b.fanOut(ctx, input, timeoutSeconds)
@@ -122,25 +134,16 @@ func (b *BroadcastMessageTool) fanOut(ctx context.Context, input *BroadcastMessa
 }
 
 // buildResponse constructs the MCP result from collected outcomes.
-func (b *BroadcastMessageTool) buildResponse(outcomes map[string]*agentOutcome) (*mcp.CallToolResult, any, error) {
-	results := make(map[string]*broadcastResult, len(outcomes))
+func (b *BroadcastMessageTool) buildResponse(outcomes map[string]*agentOutcome) (*mcp.CallToolResult, map[string]*SendMessageOutput, error) {
 	structured := make(map[string]*SendMessageOutput, len(outcomes))
 
 	for alias, outcome := range outcomes {
-		results[alias] = outcome.result
 		if outcome.response != nil {
 			structured[alias] = outcome.response
 		}
 	}
 
-	resultJSON, err := json.Marshal(results)
-	if err != nil {
-		return toolError(fmt.Sprintf("failed to serialize broadcast results: %v", err)), nil, nil
-	}
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: string(resultJSON)}},
-	}, structured, nil
+	return nil, structured, nil
 }
 
 // broadcastToAgent sends a message to a single agent and returns the result.

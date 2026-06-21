@@ -52,12 +52,12 @@ func TestPropertyFileBackendRoundTripPreservesEntries(t *testing.T) {
 			timestamp := baseTime.Add(time.Duration(tsOffset) * time.Second)
 
 			entry := Entry{
-				Timestamp: timestamp,
-				SentMsg:   sentMsg,
-				Response:  response,
-				ContextID: contextID,
-				TaskID:    taskID,
-				IsError:   isError,
+				Timestamp:   timestamp.Format(time.RFC3339),
+				SentMessage: sentMsg,
+				Response:    response,
+				ContextID:   contextID,
+				TaskID:      taskID,
+				IsError:     isError,
 			}
 
 			// Append the entry
@@ -83,14 +83,14 @@ func TestPropertyFileBackendRoundTripPreservesEntries(t *testing.T) {
 			// Field-by-field comparison after JSON round-trip normalization
 
 			// Verify timestamp is preserved
-			if !got.Timestamp.Equal(entry.Timestamp) {
+			if !(got.Timestamp == entry.Timestamp) {
 				t.Logf("Timestamp mismatch: got %v, want %v", got.Timestamp, entry.Timestamp)
 				return false
 			}
 
 			// Verify sent message is preserved
-			if got.SentMsg != entry.SentMsg {
-				t.Logf("SentMsg mismatch: got %q, want %q", got.SentMsg, entry.SentMsg)
+			if got.SentMessage != entry.SentMessage {
+				t.Logf("SentMsg mismatch: got %q, want %q", got.SentMessage, entry.SentMessage)
 				return false
 			}
 

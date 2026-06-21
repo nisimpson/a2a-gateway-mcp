@@ -8,6 +8,11 @@ import (
 	"github.com/nisimpson/a2a-gateway-mcp/internal/validate"
 )
 
+// DisconnectAgentOutput is the output schema for the disconnect_agent tool.
+type DisconnectAgentOutput struct {
+	Message string `json:"message" jsonschema:"confirmation message indicating successful disconnection"`
+}
+
 // DisconnectAgentInput is the input schema for the disconnect_agent tool.
 type DisconnectAgentInput struct {
 	Alias string `json:"alias" jsonschema:"alias of the agent to disconnect"`
@@ -23,6 +28,18 @@ type DisconnectAgentTool struct {
 	HistoryBackend    HistoryBackend // nil if history is disabled
 }
 
+// NewDisconnectAgentTool creates a new DisconnectAgentTool from the shared environment.
+func NewDisconnectAgentTool(env *Env) *DisconnectAgentTool {
+	return &DisconnectAgentTool{
+		AgentRegistry:     env.AgentRegistry,
+		A2AClientResolver: env.A2AClientResolver,
+		ContextStore:      env.ContextStore,
+		RateLimiter:       env.RateLimiter,
+		HealthTracker:     env.HealthTracker,
+		HistoryBackend:    env.HistoryBackend,
+	}
+}
+
 func (d *DisconnectAgentTool) Tool() *mcp.Tool {
 	return &mcp.Tool{
 		Name:        "disconnect_agent",
@@ -30,14 +47,14 @@ func (d *DisconnectAgentTool) Tool() *mcp.Tool {
 	}
 }
 
-func (d *DisconnectAgentTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *DisconnectAgentInput) (*mcp.CallToolResult, any, error) {
+func (d *DisconnectAgentTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *DisconnectAgentInput) (*mcp.CallToolResult, *DisconnectAgentOutput, error) {
 	if err := validate.Alias(input.Alias); err != nil {
-		return toolError(err.Error()), nil, nil
+		return nil, nil, err
 	}
 
 	entry := d.AgentRegistry.Disconnect(input.Alias)
 	if entry == nil {
-		return toolError(fmt.Sprintf("agent %q not found in registry", input.Alias)), nil, nil
+		return nil, nil, fmt.Errorf("agent %q not found in registry", input.Alias)
 	}
 
 	// Clean up associated state.
@@ -50,9 +67,8 @@ func (d *DisconnectAgentTool) Handle(ctx context.Context, _ *mcp.CallToolRequest
 		_ = d.HistoryBackend.Delete(ctx, input.Alias)
 	}
 
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{
-			Text: fmt.Sprintf("Disconnected agent %q", input.Alias),
-		}},
-	}, nil, nil
+	output := &DisconnectAgentOutput{
+		Message: fmt.Sprintf("Disconnected agent %q", input.Alias),
+	}
+	return nil, output, nil
 }

@@ -31,18 +31,18 @@ func TestPropertyRecordingPreservesAllFields(t *testing.T) {
 	boolGen := gen.Bool()
 
 	properties.Property("Appended entry preserves all provided fields when retrieved via List", prop.ForAll(
-		func(sentMsg string, response string, contextID string, taskID string, isError bool) bool {
+		func(sentMessage string, response string, contextID string, taskID string, isError bool) bool {
 			backend := NewMemoryBackend(50)
 			ctx := context.Background()
 			alias := "test-agent"
 
 			entry := Entry{
-				Timestamp: time.Now().UTC(),
-				SentMsg:   sentMsg,
-				Response:  response,
-				ContextID: contextID,
-				TaskID:    taskID,
-				IsError:   isError,
+				Timestamp:   time.Now().UTC().Format(time.RFC3339),
+				SentMessage: sentMessage,
+				Response:    response,
+				ContextID:   contextID,
+				TaskID:      taskID,
+				IsError:     isError,
 			}
 
 			err := backend.Append(ctx, alias, entry)
@@ -65,8 +65,8 @@ func TestPropertyRecordingPreservesAllFields(t *testing.T) {
 			got := entries[0]
 
 			// Verify sent message is preserved
-			if got.SentMsg != sentMsg {
-				t.Logf("SentMsg mismatch: got %q, want %q", got.SentMsg, sentMsg)
+			if got.SentMessage != sentMessage {
+				t.Logf("SentMessage mismatch: got %q, want %q", got.SentMessage, sentMessage)
 				return false
 			}
 
@@ -95,7 +95,7 @@ func TestPropertyRecordingPreservesAllFields(t *testing.T) {
 			}
 
 			// Verify timestamp is non-zero
-			if got.Timestamp.IsZero() {
+			if got.Timestamp == "" {
 				t.Log("Timestamp is zero")
 				return false
 			}
@@ -141,12 +141,12 @@ func TestPropertyDepthEnforcementEvictsOldestEntries(t *testing.T) {
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			for i := 0; i < n; i++ {
 				entry := Entry{
-					Timestamp: baseTime.Add(time.Duration(i) * time.Second),
-					SentMsg:   fmt.Sprintf("msg-%d", i),
-					Response:  fmt.Sprintf("resp-%d", i),
-					ContextID: fmt.Sprintf("ctx-%d", i),
-					TaskID:    fmt.Sprintf("task-%d", i),
-					IsError:   false,
+					Timestamp:   baseTime.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
+					SentMessage: fmt.Sprintf("msg-%d", i),
+					Response:    fmt.Sprintf("resp-%d", i),
+					ContextID:   fmt.Sprintf("ctx-%d", i),
+					TaskID:      fmt.Sprintf("task-%d", i),
+					IsError:     false,
 				}
 				if err := backend.Append(ctx, alias, entry); err != nil {
 					t.Logf("Append returned error: %v", err)
@@ -174,15 +174,15 @@ func TestPropertyDepthEnforcementEvictsOldestEntries(t *testing.T) {
 				expectedResp := fmt.Sprintf("resp-%d", expectedIdx)
 				expectedTimestamp := baseTime.Add(time.Duration(expectedIdx) * time.Second)
 
-				if entry.SentMsg != expectedMsg {
-					t.Logf("entry[%d] SentMsg: got %q, want %q", i, entry.SentMsg, expectedMsg)
+				if entry.SentMessage != expectedMsg {
+					t.Logf("entry[%d] SentMessage: got %q, want %q", i, entry.SentMessage, expectedMsg)
 					return false
 				}
 				if entry.Response != expectedResp {
 					t.Logf("entry[%d] Response: got %q, want %q", i, entry.Response, expectedResp)
 					return false
 				}
-				if !entry.Timestamp.Equal(expectedTimestamp) {
+				if !entry.ParseTimestamp().Equal(expectedTimestamp) {
 					t.Logf("entry[%d] Timestamp: got %v, want %v", i, entry.Timestamp, expectedTimestamp)
 					return false
 				}
@@ -190,7 +190,7 @@ func TestPropertyDepthEnforcementEvictsOldestEntries(t *testing.T) {
 
 			// Verify chronological order is preserved
 			for i := 1; i < len(entries); i++ {
-				if entries[i].Timestamp.Before(entries[i-1].Timestamp) {
+				if entries[i].ParseTimestamp().Before(entries[i-1].ParseTimestamp()) {
 					t.Logf("entry[%d] timestamp %v is before entry[%d] timestamp %v",
 						i, entries[i].Timestamp, i-1, entries[i-1].Timestamp)
 					return false
@@ -229,12 +229,12 @@ func TestPropertyListReturnsEntriesInChronologicalOrder(t *testing.T) {
 			appendedEntries := make([]Entry, count)
 			for i := 0; i < count; i++ {
 				entry := Entry{
-					Timestamp: baseTime.Add(time.Duration(i) * time.Second),
-					SentMsg:   fmt.Sprintf("msg-%d", i),
-					Response:  fmt.Sprintf("resp-%d", i),
-					ContextID: fmt.Sprintf("ctx-%d", i),
-					TaskID:    fmt.Sprintf("task-%d", i),
-					IsError:   i%2 == 0,
+					Timestamp:   baseTime.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
+					SentMessage: fmt.Sprintf("msg-%d", i),
+					Response:    fmt.Sprintf("resp-%d", i),
+					ContextID:   fmt.Sprintf("ctx-%d", i),
+					TaskID:      fmt.Sprintf("task-%d", i),
+					IsError:     i%2 == 0,
 				}
 				appendedEntries[i] = entry
 				if err := backend.Append(ctx, alias, entry); err != nil {
@@ -257,7 +257,7 @@ func TestPropertyListReturnsEntriesInChronologicalOrder(t *testing.T) {
 
 			// Entries must be in chronological order (oldest first)
 			for i := 1; i < len(entries); i++ {
-				if !entries[i].Timestamp.After(entries[i-1].Timestamp) {
+				if !entries[i].ParseTimestamp().After(entries[i-1].ParseTimestamp()) {
 					t.Logf("entry[%d] timestamp %v is not after entry[%d] timestamp %v",
 						i, entries[i].Timestamp, i-1, entries[i-1].Timestamp)
 					return false
@@ -266,15 +266,15 @@ func TestPropertyListReturnsEntriesInChronologicalOrder(t *testing.T) {
 
 			// Entries must match appended order exactly
 			for i, entry := range entries {
-				if entry.SentMsg != appendedEntries[i].SentMsg {
-					t.Logf("entry[%d] SentMsg: got %q, want %q", i, entry.SentMsg, appendedEntries[i].SentMsg)
+				if entry.SentMessage != appendedEntries[i].SentMessage {
+					t.Logf("entry[%d] SentMessage: got %q, want %q", i, entry.SentMessage, appendedEntries[i].SentMessage)
 					return false
 				}
 				if entry.Response != appendedEntries[i].Response {
 					t.Logf("entry[%d] Response: got %q, want %q", i, entry.Response, appendedEntries[i].Response)
 					return false
 				}
-				if !entry.Timestamp.Equal(appendedEntries[i].Timestamp) {
+				if !entry.ParseTimestamp().Equal(appendedEntries[i].ParseTimestamp()) {
 					t.Logf("entry[%d] Timestamp: got %v, want %v", i, entry.Timestamp, appendedEntries[i].Timestamp)
 					return false
 				}
@@ -323,12 +323,12 @@ func TestPropertyLimitParameterReturnsMostRecentEntries(t *testing.T) {
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			for i := 0; i < entryCount; i++ {
 				entry := Entry{
-					Timestamp: baseTime.Add(time.Duration(i) * time.Second),
-					SentMsg:   fmt.Sprintf("msg-%d", i),
-					Response:  fmt.Sprintf("resp-%d", i),
-					ContextID: fmt.Sprintf("ctx-%d", i),
-					TaskID:    fmt.Sprintf("task-%d", i),
-					IsError:   false,
+					Timestamp:   baseTime.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
+					SentMessage: fmt.Sprintf("msg-%d", i),
+					Response:    fmt.Sprintf("resp-%d", i),
+					ContextID:   fmt.Sprintf("ctx-%d", i),
+					TaskID:      fmt.Sprintf("task-%d", i),
+					IsError:     false,
 				}
 				if err := backend.Append(ctx, alias, entry); err != nil {
 					t.Logf("Append returned error: %v", err)
@@ -360,15 +360,15 @@ func TestPropertyLimitParameterReturnsMostRecentEntries(t *testing.T) {
 			startIdx := len(allEntries) - expectedCount
 			for i, entry := range limited {
 				expected := allEntries[startIdx+i]
-				if entry.SentMsg != expected.SentMsg {
-					t.Logf("entry[%d] SentMsg: got %q, want %q", i, entry.SentMsg, expected.SentMsg)
+				if entry.SentMessage != expected.SentMessage {
+					t.Logf("entry[%d] SentMessage: got %q, want %q", i, entry.SentMessage, expected.SentMessage)
 					return false
 				}
 				if entry.Response != expected.Response {
 					t.Logf("entry[%d] Response: got %q, want %q", i, entry.Response, expected.Response)
 					return false
 				}
-				if !entry.Timestamp.Equal(expected.Timestamp) {
+				if !entry.ParseTimestamp().Equal(expected.ParseTimestamp()) {
 					t.Logf("entry[%d] Timestamp: got %v, want %v", i, entry.Timestamp, expected.Timestamp)
 					return false
 				}
@@ -376,7 +376,7 @@ func TestPropertyLimitParameterReturnsMostRecentEntries(t *testing.T) {
 
 			// Verify chronological order is maintained
 			for i := 1; i < len(limited); i++ {
-				if !limited[i].Timestamp.After(limited[i-1].Timestamp) {
+				if !limited[i].ParseTimestamp().After(limited[i-1].ParseTimestamp()) {
 					t.Logf("entry[%d] timestamp %v is not after entry[%d] timestamp %v",
 						i, limited[i].Timestamp, i-1, limited[i-1].Timestamp)
 					return false
@@ -415,12 +415,12 @@ func TestPropertyDeleteRemovesAllEntriesForAnAlias(t *testing.T) {
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			for i := 0; i < entryCount; i++ {
 				entry := Entry{
-					Timestamp: baseTime.Add(time.Duration(i) * time.Second),
-					SentMsg:   fmt.Sprintf("msg-%d", i),
-					Response:  fmt.Sprintf("resp-%d", i),
-					ContextID: fmt.Sprintf("ctx-%d", i),
-					TaskID:    fmt.Sprintf("task-%d", i),
-					IsError:   i%2 == 0,
+					Timestamp:   baseTime.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
+					SentMessage: fmt.Sprintf("msg-%d", i),
+					Response:    fmt.Sprintf("resp-%d", i),
+					ContextID:   fmt.Sprintf("ctx-%d", i),
+					TaskID:      fmt.Sprintf("task-%d", i),
+					IsError:     i%2 == 0,
 				}
 				if err := backend.Append(ctx, alias, entry); err != nil {
 					t.Logf("Append returned error: %v", err)
@@ -472,12 +472,12 @@ func TestPropertyDeleteRemovesAllEntriesForAnAlias(t *testing.T) {
 			baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 			for i := 0; i < entryCount; i++ {
 				entry := Entry{
-					Timestamp: baseTime.Add(time.Duration(i) * time.Second),
-					SentMsg:   fmt.Sprintf("msg-%d", i),
-					Response:  fmt.Sprintf("resp-%d", i),
-					ContextID: fmt.Sprintf("ctx-%d", i),
-					TaskID:    fmt.Sprintf("task-%d", i),
-					IsError:   i%2 == 0,
+					Timestamp:   baseTime.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
+					SentMessage: fmt.Sprintf("msg-%d", i),
+					Response:    fmt.Sprintf("resp-%d", i),
+					ContextID:   fmt.Sprintf("ctx-%d", i),
+					TaskID:      fmt.Sprintf("task-%d", i),
+					IsError:     i%2 == 0,
 				}
 				if err := backend.Append(ctx, alias, entry); err != nil {
 					t.Logf("Append returned error: %v", err)
@@ -567,12 +567,12 @@ func TestPropertyConcurrentOperationsMaintainSafetyInvariants(t *testing.T) {
 						switch opType {
 						case 0: // Append
 							entry := Entry{
-								Timestamp: time.Now().UTC(),
-								SentMsg:   fmt.Sprintf("msg-g%d-op%d", goroutineID, op),
-								Response:  fmt.Sprintf("resp-g%d-op%d", goroutineID, op),
-								ContextID: fmt.Sprintf("ctx-g%d", goroutineID),
-								TaskID:    fmt.Sprintf("task-g%d-op%d", goroutineID, op),
-								IsError:   op%5 == 0,
+								Timestamp:   time.Now().UTC().Format(time.RFC3339),
+								SentMessage: fmt.Sprintf("msg-g%d-op%d", goroutineID, op),
+								Response:    fmt.Sprintf("resp-g%d-op%d", goroutineID, op),
+								ContextID:   fmt.Sprintf("ctx-g%d", goroutineID),
+								TaskID:      fmt.Sprintf("task-g%d-op%d", goroutineID, op),
+								IsError:     op%5 == 0,
 							}
 							_ = backend.Append(ctx, alias, entry)
 						case 1: // List
@@ -589,7 +589,7 @@ func TestPropertyConcurrentOperationsMaintainSafetyInvariants(t *testing.T) {
 							}
 							// Verify all entries have non-zero timestamps (data integrity)
 							for i, e := range entries {
-								if e.Timestamp.IsZero() {
+								if e.ParseTimestamp().IsZero() {
 									panicCh <- fmt.Sprintf("goroutine %d: entry[%d] has zero timestamp",
 										goroutineID, i)
 									return
@@ -626,12 +626,12 @@ func TestPropertyConcurrentOperationsMaintainSafetyInvariants(t *testing.T) {
 
 			// Verify data integrity: all entries have valid, non-zero timestamps
 			for i, e := range entries {
-				if e.Timestamp.IsZero() {
+				if e.ParseTimestamp().IsZero() {
 					t.Logf("entry[%d] has zero timestamp", i)
 					return false
 				}
-				if e.SentMsg == "" {
-					t.Logf("entry[%d] has empty SentMsg", i)
+				if e.SentMessage == "" {
+					t.Logf("entry[%d] has empty SentMessage", i)
 					return false
 				}
 				if e.Response == "" {
@@ -651,10 +651,10 @@ func TestPropertyConcurrentOperationsMaintainSafetyInvariants(t *testing.T) {
 			// remaining entries are those appended after the last Delete,
 			// which should be in non-decreasing timestamp order.
 			for i := 1; i < len(entries); i++ {
-				if entries[i].Timestamp.Before(entries[i-1].Timestamp) {
+				if entries[i].ParseTimestamp().Before(entries[i-1].ParseTimestamp()) {
 					// Allow small clock jitter (< 1ms) that can occur on some
 					// systems when goroutines are scheduled very close together.
-					diff := entries[i-1].Timestamp.Sub(entries[i].Timestamp)
+					diff := entries[i-1].ParseTimestamp().Sub(entries[i].ParseTimestamp())
 					if diff > time.Millisecond {
 						t.Logf("entry[%d] timestamp %v is before entry[%d] timestamp %v (diff: %v)",
 							i, entries[i].Timestamp, i-1, entries[i-1].Timestamp, diff)

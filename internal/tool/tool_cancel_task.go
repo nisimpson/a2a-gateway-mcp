@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -14,10 +15,24 @@ type CancelTaskInput struct {
 	TaskID string `json:"task_id" jsonschema:"the task identifier to cancel"`
 }
 
+// CancelTaskOutput is the output schema for the cancel_task tool.
+type CancelTaskOutput struct {
+	Message string `json:"message" jsonschema:"confirmation that the task was canceled"`
+}
+
 // CancelTaskTool cancels a previously initiated task on an A2A agent.
 type CancelTaskTool struct {
 	AgentRegistry     AgentRegistry
 	A2AClientResolver A2AClientResolver
+}
+
+// NewCancelTaskTool creates a new CancelTaskTool using the registry and client
+// resolver from the provided environment.
+func NewCancelTaskTool(env *Env) *CancelTaskTool {
+	return &CancelTaskTool{
+		AgentRegistry:     env.AgentRegistry,
+		A2AClientResolver: env.A2AClientResolver,
+	}
 }
 
 func (c *CancelTaskTool) Tool() *mcp.Tool {
@@ -27,36 +42,31 @@ func (c *CancelTaskTool) Tool() *mcp.Tool {
 	}
 }
 
-func (c *CancelTaskTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *CancelTaskInput) (*mcp.CallToolResult, any, error) {
+func (c *CancelTaskTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *CancelTaskInput) (*mcp.CallToolResult, *CancelTaskOutput, error) {
 	if input.Agent == "" {
-		return toolError("agent identifier is required"), nil, nil
+		return nil, nil, errors.New("agent identifier is required")
 	}
 	if input.TaskID == "" {
-		return toolError("task_id is required"), nil, nil
+		return nil, nil, errors.New("task_id is required")
 	}
 
 	resolved, err := c.AgentRegistry.ResolveAgent(input.Agent)
 	if err != nil {
-		return toolError(err.Error()), nil, nil
+		return nil, nil, err
 	}
 
 	a2aClient, err := c.A2AClientResolver.Resolve(ctx, resolved)
 	if err != nil {
-		return handleA2AError(err), nil, nil
+		return nil, nil, handleA2AError(err)
 	}
 
-	task, err := a2aClient.CancelTask(ctx, &a2a.CancelTaskRequest{ID: a2a.TaskID(input.TaskID)})
+	_, err = a2aClient.CancelTask(ctx, &a2a.CancelTaskRequest{ID: a2a.TaskID(input.TaskID)})
 	if err != nil {
-		return handleA2AError(err), nil, nil
+		return nil, nil, handleA2AError(err)
 	}
 
-	if task.Status.State == a2a.TaskStateCanceled {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Task %s has been canceled", input.TaskID)}},
-		}, nil, nil
+	output := &CancelTaskOutput{
+		Message: fmt.Sprintf("Task %s has been canceled", input.TaskID),
 	}
-
-	// For other states, format by state (unexpected but handle gracefully).
-	result, _ := FormatTaskResponse(task)
-	return result, nil, nil
+	return nil, output, nil
 }

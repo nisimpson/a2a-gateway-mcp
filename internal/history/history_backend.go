@@ -2,17 +2,32 @@ package history
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
 // Entry represents a single recorded interaction with an agent.
 type Entry struct {
-	Timestamp time.Time `json:"timestamp"`            // When the interaction occurred
-	SentMsg   string    `json:"sent_message"`         // Message sent to the agent
-	Response  string    `json:"response"`             // Agent's reply
-	ContextID string    `json:"context_id,omitempty"` // Conversation thread identifier
-	TaskID    string    `json:"task_id,omitempty"`    // Associated task identifier
-	IsError   bool      `json:"is_error,omitempty"`   // Whether the response was an error
+	Timestamp   string `json:"timestamp" jsonschema:"ISO 8601 timestamp of the interaction"`
+	SentMessage string `json:"sent_message" jsonschema:"message sent to the agent"`
+	Response    string `json:"response" jsonschema:"response received from the agent"`
+	ContextID   string `json:"context_id,omitempty" jsonschema:"context identifier if present"`
+	TaskID      string `json:"task_id,omitempty" jsonschema:"task identifier if present"`
+	IsError     bool   `json:"is_error,omitempty" jsonschema:"whether the interaction resulted in an error"`
+}
+
+// ParseTimestamp parses the entry's ISO 8601 timestamp string into a time.Time value.
+// It returns the zero time if the Timestamp field is empty.
+// It panics if the Timestamp field is non-empty but cannot be parsed as RFC 3339.
+func (e Entry) ParseTimestamp() time.Time {
+	if e.Timestamp == "" {
+		return time.Time{}
+	}
+	ts, err := time.Parse(time.RFC3339, e.Timestamp)
+	if err != nil {
+		panic(fmt.Errorf("unable to parse timestamp"))
+	}
+	return ts
 }
 
 // Backend is the pluggable storage interface for interaction history.

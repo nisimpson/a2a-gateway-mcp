@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -42,25 +43,38 @@ type CreateCallerCardInput struct {
 	MetadataKey  string              `json:"metadata_key,omitempty" jsonschema:"metadata attribute name the card will be injected under (default: caller_agent_card)"`
 }
 
+// CreateCallerCardOutput is the output schema for the create_caller_card tool.
+type CreateCallerCardOutput struct {
+	Message string `json:"message" jsonschema:"confirmation that the caller card was registered"`
+}
+
 // CreateCallerCardTool registers or replaces the caller agent card.
 type CreateCallerCardTool struct {
 	Store CallerCardStore
+}
+
+// NewCreateCallerCardTool creates a new CreateCallerCardTool using the caller card store from the given environment.
+func NewCreateCallerCardTool(env *Env) *CreateCallerCardTool {
+	return &CreateCallerCardTool{
+		Store: env.CallerCardStore,
+	}
 }
 
 func (c *CreateCallerCardTool) Tool() *mcp.Tool {
 	return &mcp.Tool{
 		Name: "create_caller_card",
 		Description: toolDescription(
-			"Register a caller agent card that is automatically included on all outbound messages (send_message and broadcast_message).",
-			"Calling again replaces the previous card.",
-			"This enables target agents to discover the caller's capabilities and delegate tasks back without requiring a .well-known/agent-card.json endpoint.",
+			"Register a caller agent card that is automatically included on all outbound messages",
+			"(send_message and broadcast_message). Calling again replaces the previous card.",
+			"This enables target agents to discover the caller's capabilities and delegate tasks back",
+			"without requiring a .well-known/agent-card.json endpoint.",
 		),
 	}
 }
 
-func (c *CreateCallerCardTool) Handle(_ context.Context, _ *mcp.CallToolRequest, input *CreateCallerCardInput) (*mcp.CallToolResult, any, error) {
+func (c *CreateCallerCardTool) Handle(_ context.Context, _ *mcp.CallToolRequest, input *CreateCallerCardInput) (*mcp.CallToolResult, *CreateCallerCardOutput, error) {
 	if strings.TrimSpace(input.Name) == "" {
-		return toolError("name must not be empty or whitespace-only"), nil, nil
+		return nil, nil, errors.New("name must not be empty or whitespace-only")
 	}
 
 	card := &CallerCard{
@@ -73,9 +87,10 @@ func (c *CreateCallerCardTool) Handle(_ context.Context, _ *mcp.CallToolRequest,
 
 	c.Store.Set(card, input.MetadataKey)
 
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Caller agent card registered for %q", input.Name)}},
-	}, nil, nil
+	output := &CreateCallerCardOutput{
+		Message: fmt.Sprintf("Caller agent card registered for %q", input.Name),
+	}
+	return nil, output, nil
 }
 
 // --- ViewCallerCardTool ---
@@ -88,6 +103,13 @@ type ViewCallerCardTool struct {
 	Store CallerCardStore
 }
 
+// NewViewCallerCardTool creates a new ViewCallerCardTool using the caller card store from the given environment.
+func NewViewCallerCardTool(env *Env) *ViewCallerCardTool {
+	return &ViewCallerCardTool{
+		Store: env.CallerCardStore,
+	}
+}
+
 func (v *ViewCallerCardTool) Tool() *mcp.Tool {
 	return &mcp.Tool{
 		Name:        "view_caller_card",
@@ -95,7 +117,8 @@ func (v *ViewCallerCardTool) Tool() *mcp.Tool {
 	}
 }
 
-func (v *ViewCallerCardTool) Handle(_ context.Context, _ *mcp.CallToolRequest, _ *ViewCallerCardInput) (*mcp.CallToolResult, any, error) {
+func (v *ViewCallerCardTool) Handle(_ context.Context,
+	_ *mcp.CallToolRequest, _ *ViewCallerCardInput) (*mcp.CallToolResult, any, error) {
 	card := v.Store.Get()
 	if card == nil {
 		return &mcp.CallToolResult{
@@ -105,7 +128,7 @@ func (v *ViewCallerCardTool) Handle(_ context.Context, _ *mcp.CallToolRequest, _
 
 	data, err := json.MarshalIndent(card, "", "  ")
 	if err != nil {
-		return toolError(fmt.Sprintf("failed to serialize caller card: %v", err)), nil, nil
+		return nil, nil, fmt.Errorf("failed to serialize caller card: %v", err)
 	}
 
 	return &mcp.CallToolResult{
@@ -113,14 +136,24 @@ func (v *ViewCallerCardTool) Handle(_ context.Context, _ *mcp.CallToolRequest, _
 	}, nil, nil
 }
 
-// --- RemoveCallerCardTool ---
-
 // RemoveCallerCardInput is the input schema for the remove_caller_card tool (empty).
 type RemoveCallerCardInput struct{}
+
+// RemoveCallerCardOutput is the output schema for the remove_caller_card tool.
+type RemoveCallerCardOutput struct {
+	Message string `json:"message" jsonschema:"confirmation that the caller card was removed"`
+}
 
 // RemoveCallerCardTool clears the stored caller agent card.
 type RemoveCallerCardTool struct {
 	Store CallerCardStore
+}
+
+// NewRemoveCallerCardTool creates a new NewRemoveCallerCardTool using the caller card store from the given environment.
+func NewRemoveCallerCardTool(env *Env) *RemoveCallerCardTool {
+	return &RemoveCallerCardTool{
+		Store: env.CallerCardStore,
+	}
 }
 
 func (r *RemoveCallerCardTool) Tool() *mcp.Tool {
@@ -130,15 +163,14 @@ func (r *RemoveCallerCardTool) Tool() *mcp.Tool {
 	}
 }
 
-func (r *RemoveCallerCardTool) Handle(_ context.Context, _ *mcp.CallToolRequest, _ *RemoveCallerCardInput) (*mcp.CallToolResult, any, error) {
+func (r *RemoveCallerCardTool) Handle(_ context.Context, _ *mcp.CallToolRequest, _ *RemoveCallerCardInput) (*mcp.CallToolResult, *RemoveCallerCardOutput, error) {
 	had := r.Store.Remove()
 	if !had {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: "no caller agent card was set"}},
-		}, nil, nil
+		return nil, nil, errors.New("no caller agent card was set")
 	}
 
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: "Caller agent card removed"}},
-	}, nil, nil
+	output := &RemoveCallerCardOutput{
+		Message: "Caller agent card removed",
+	}
+	return nil, output, nil
 }

@@ -11,6 +11,24 @@ import (
 	"github.com/nisimpson/a2a-gateway-mcp/internal/history"
 )
 
+type Env struct {
+	AgentRegistry
+	HealthTracker
+	RateLimiter
+	HistoryBackend
+	A2AClientResolver
+	CallerCardInjector
+	CallerCardStore
+	ContextStore
+	HistoryRecorder
+	AgentCardFetcher
+	HTTPDoer
+	PingStrategy
+	EffectivePollTimeout   EffectiveTimeoutFunc
+	EffectiveStreamTimeout EffectiveTimeoutFunc
+	DefaultRateLimit       RateLimitConfig
+}
+
 // ToolDefinition defines the interface that all MCP tools must implement.
 type ToolDefinition[T, U any] interface {
 	Handle(ctx context.Context, req *mcp.CallToolRequest, in T) (res *mcp.CallToolResult, out U, err error)
@@ -22,7 +40,30 @@ func AddTool[T, U any](srv *mcp.Server, def ToolDefinition[T, U]) {
 	mcp.AddTool(srv, def.Tool(), def.Handle)
 }
 
+// RegisterAll registers all gateway tools with the given MCP server.
+func RegisterAll(srv *mcp.Server, env *Env) {
+	AddTool(srv, NewSendMessageTool(env))
+	AddTool(srv, NewBroadcastMessageTool(env))
+	AddTool(srv, NewPingAgentTool(env))
+	AddTool(srv, NewConnectAgentTool(env))
+	AddTool(srv, NewDisconnectAgentTool(env))
+	AddTool(srv, NewListAgentsTool(env))
+	AddTool(srv, NewGetAgentCardTool(env))
+	AddTool(srv, NewGetTaskTool(env))
+	AddTool(srv, NewCancelTaskTool(env))
+	AddTool(srv, NewGetHistoryTool(env))
+	AddTool(srv, NewClearHistoryTool(env))
+	AddTool(srv, NewCreateCallerCardTool(env))
+	AddTool(srv, NewViewCallerCardTool(env))
+	AddTool(srv, NewRemoveCallerCardTool(env))
+	AddTool(srv, NewDiscoverAgentsTool(env))
+}
+
 // --- Shared types ---
+
+// EffectiveTimeoutFunc computes the effective poll timeout given an optional
+// per-request timeout override in seconds.
+type EffectiveTimeoutFunc = func(requestSeconds *int) time.Duration
 
 // AgentEntry holds connection info for a registered agent.
 type AgentEntry struct {
@@ -97,8 +138,8 @@ type HealthTracker interface {
 type RateLimiter interface {
 	// Allow reports whether the alias is permitted to proceed.
 	Allow(alias string) bool
-	// CheckRateLimit returns a non-nil error result if rate limited, nil if allowed.
-	CheckRateLimit(alias string) *mcp.CallToolResult
+	// CheckRateLimit returns a non-nil error if rate limited, nil if allowed.
+	CheckRateLimit(alias string) error
 	// Set configures the rate limit for an alias.
 	Set(alias string, rps float64, burst int)
 	// Remove deletes the rate limit for an alias.

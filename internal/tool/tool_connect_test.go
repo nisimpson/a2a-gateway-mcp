@@ -190,7 +190,7 @@ func TestConnect_DefaultRateLimitApplied(t *testing.T) {
 		return false
 	}
 
-	tool.DefaultRateLimit = &RateLimitConfig{RequestsPerSecond: 2.0, Burst: 4}
+	tool.DefaultRateLimit = RateLimitConfig{RequestsPerSecond: 2.0, Burst: 4}
 
 	var setAlias string
 	var setRPS float64

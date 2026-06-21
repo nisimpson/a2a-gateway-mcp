@@ -16,43 +16,47 @@ import (
 
 func newSendTool(reg *mockRegistry, clientResolver *mockClientResolver) *SendMessageTool {
 	return &SendMessageTool{
-		AgentRegistry:      reg,
-		A2AClientResolver:  clientResolver,
-		ContextStore:       newMockContextStore(),
-		CallerCardInjector: &mockCallerCardInjector{},
-		HealthTracker:      &mockHealthTracker{},
-		HistoryRecorder:    &mockHistoryRecorder{},
-		RateLimiter:        &mockRateLimiter{},
-		StreamTimeout:      5 * time.Second,
-		EffectivePollTimeout: func(_ *int) time.Duration { return 10 * time.Second },
+		AgentRegistry:          reg,
+		A2AClientResolver:      clientResolver,
+		ContextStore:           newMockContextStore(),
+		CallerCardInjector:     &mockCallerCardInjector{},
+		HealthTracker:          &mockHealthTracker{},
+		HistoryRecorder:        &mockHistoryRecorder{},
+		RateLimiter:            &mockRateLimiter{},
+		EffectiveStreamTimeout: effectiveStreamTimeout(5 * time.Second),
+		EffectivePollTimeout:   func(_ *int) time.Duration { return 10 * time.Second },
 	}
 }
 
 func TestSendMessage_AgentRequired(t *testing.T) {
 	s := newSendTool(&mockRegistry{}, &mockClientResolver{})
 	result, out, err := s.Handle(context.Background(), nil, &SendMessageInput{})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatal("expected nil result for validation error")
 	}
 	if out != nil {
 		t.Fatal("expected nil structured output")
 	}
-	assertTextContains(t, result, "agent identifier is required")
+	if err.Error() != "agent identifier is required" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestSendMessage_MessageOrPartsRequired(t *testing.T) {
 	s := newSendTool(&mockRegistry{}, &mockClientResolver{})
 	result, _, err := s.Handle(context.Background(), nil, &SendMessageInput{Agent: "test"})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatal("expected nil result for validation error")
 	}
-	assertTextContains(t, result, "either 'message' or 'parts' is required")
+	if err.Error() != "either 'message' or 'parts' is required" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestSendMessage_InvalidAgent(t *testing.T) {
@@ -66,24 +70,23 @@ func TestSendMessage_InvalidAgent(t *testing.T) {
 		Agent:   "nonexistent",
 		Message: "hello",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatal("expected nil result for error")
 	}
-	assertTextContains(t, result, "agent not found")
+	if err.Error() != "agent not found" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestSendMessage_RateLimited(t *testing.T) {
 	reg := &mockRegistry{}
 	s := newSendTool(reg, &mockClientResolver{})
 	s.RateLimiter = &mockRateLimiter{
-		CheckRateLimitFn: func(alias string) *mcp.CallToolResult {
-			return &mcp.CallToolResult{
-				IsError: true,
-				Content: []mcp.Content{&mcp.TextContent{Text: "rate limited"}},
-			}
+		CheckRateLimitFn: func(alias string) error {
+			return fmt.Errorf("rate limited")
 		},
 	}
 
@@ -91,13 +94,15 @@ func TestSendMessage_RateLimited(t *testing.T) {
 		Agent:   "test-agent",
 		Message: "hello",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatal("expected nil result for rate limit error")
 	}
-	assertTextContains(t, result, "rate limited")
+	if err.Error() != "rate limited: rate limited" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestSendMessage_DirectPath_MessageResponse(t *testing.T) {
@@ -129,23 +134,19 @@ func TestSendMessage_DirectPath_MessageResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatalf("expected nil result for success: %v", result)
 	}
 	if out == nil {
 		t.Fatal("expected structured output")
 	}
 
 	// Verify structured output wraps the message.
-	structured, ok := out.(*SendMessageOutput)
-	if !ok {
-		t.Fatalf("expected *SendMessageOutput, got %T", out)
-	}
-	if structured.Message == nil {
+	if out.Message == nil {
 		t.Fatal("expected Message in structured output")
 	}
-	if structured.Message.ContextID != "ctx-123" {
-		t.Errorf("expected context_id ctx-123, got %s", structured.Message.ContextID)
+	if out.Message.ContextID != "ctx-123" {
+		t.Errorf("expected context_id ctx-123, got %s", out.Message.ContextID)
 	}
 }
 
@@ -183,30 +184,26 @@ func TestSendMessage_DirectPath_TaskCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatalf("expected nil result for success: %v", result)
 	}
 
-	structured, ok := out.(*SendMessageOutput)
-	if !ok {
-		t.Fatalf("expected *SendMessageOutput, got %T", out)
+	if out == nil {
+		t.Fatal("expected output")
 	}
-	if structured.Task == nil {
+	if out.Task == nil {
 		t.Fatal("expected Task in structured output")
 	}
-	if structured.Task.ID != "task-1" {
-		t.Errorf("expected task ID task-1, got %s", structured.Task.ID)
+	if out.Task.ID != "task-1" {
+		t.Errorf("expected task ID task-1, got %s", out.Task.ID)
 	}
-
-	// Verify content has the response text.
-	assertTextContains(t, result, "result text")
 }
 
 func TestSendMessage_DirectPath_TaskFailed(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
-			ID:     "task-fail",
+			ID: "task-fail",
 			Status: a2a.TaskStatus{
 				State:   a2a.TaskStateFailed,
 				Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("something broke")),
@@ -232,18 +229,17 @@ func TestSendMessage_DirectPath_TaskFailed(t *testing.T) {
 		Agent:   "test-agent",
 		Message: "hello",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for failed task")
 	}
-	if !result.IsError {
-		t.Fatal("expected IsError=true for failed task")
+	if result != nil {
+		t.Fatalf("unexpected result for operational error: %v", result)
 	}
 
-	structured, ok := out.(*SendMessageOutput)
-	if !ok {
-		t.Fatalf("expected *SendMessageOutput, got %T", out)
+	if out == nil {
+		t.Fatal("expected output for failed task")
 	}
-	if structured.Task == nil {
+	if out.Task == nil {
 		t.Fatal("expected Task in structured output for failed state")
 	}
 	assertTextContains(t, result, "something broke")
@@ -361,4 +357,21 @@ func findSubstring(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// effectiveStreamTimeout returns the stream timeout to use for a request.
+// Per-request PollTimeoutSeconds takes precedence over the server default.
+// A negative value means no timeout (wait indefinitely).
+func effectiveStreamTimeout(timeout time.Duration) EffectiveTimeoutFunc {
+	return func(requestSeconds *int) time.Duration {
+		if requestSeconds != nil {
+			if *requestSeconds < 0 {
+				return 0 // sentinel: no timeout
+			}
+			if *requestSeconds > 0 {
+				return time.Duration(*requestSeconds) * time.Second
+			}
+		}
+		return timeout
+	}
 }

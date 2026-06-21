@@ -45,8 +45,9 @@ func TestGetTask_Completed(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
-			ID:     "task-123",
-			Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+			ID:        "task-123",
+			ContextID: "ctx-abc",
+			Status:    a2a.TaskStatus{State: a2a.TaskStateCompleted},
 			Artifacts: []*a2a.Artifact{
 				{Parts: a2a.ContentParts{a2a.NewTextPart("task result")}},
 			},
@@ -67,17 +68,29 @@ func TestGetTask_Completed(t *testing.T) {
 	}
 
 	g := newGetTaskTool(reg, clientResolver)
-	result, _, err := g.Handle(context.Background(), nil, &GetTaskInput{
+	result, output, err := g.Handle(context.Background(), nil, &GetTaskInput{
 		Agent:  "test-agent",
 		TaskID: "task-123",
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatalf("expected nil result for non-error case, got %v", result)
 	}
-	assertTextContains(t, result, "task result")
+	if output == nil {
+		t.Fatal("expected non-nil output")
+	}
+	task := output.(*a2a.Task)
+	if task.ID != "task-123" {
+		t.Errorf("expected ID task-123, got %s", task.ID)
+	}
+	if task.ContextID != "ctx-abc" {
+		t.Errorf("expected ContextID ctx-abc, got %s", task.ContextID)
+	}
+	if task.Status.State != a2a.TaskStateCompleted {
+		t.Errorf("expected state completed, got %s", task.Status.State)
+	}
 }
 
 func TestGetTask_Failed(t *testing.T) {
@@ -106,25 +119,38 @@ func TestGetTask_Failed(t *testing.T) {
 	}
 
 	g := newGetTaskTool(reg, clientResolver)
-	result, _, err := g.Handle(context.Background(), nil, &GetTaskInput{
+	result, output, err := g.Handle(context.Background(), nil, &GetTaskInput{
 		Agent:  "test-agent",
 		TaskID: "task-fail",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for failed task")
 	}
-	if !result.IsError {
-		t.Fatal("expected IsError=true for failed task")
+	if result != nil {
+		t.Fatalf("expected nil result when error is returned")
 	}
-	assertTextContains(t, result, "something went wrong")
+	if output == nil {
+		t.Fatal("expected non-nil output")
+	}
+	task := output.(*a2a.Task)
+	if task.ID != "task-fail" {
+		t.Errorf("expected ID task-fail, got %s", task.ID)
+	}
+	if task.Status.State != a2a.TaskStateFailed {
+		t.Errorf("expected state failed, got %s", task.Status.State)
+	}
+	if err.Error() != "something went wrong" {
+		t.Errorf("expected error message 'something went wrong', got %s", err.Error())
+	}
 }
 
 func TestGetTask_Canceled(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req, _ := readJSONRPCRequest(r)
 		task := &a2a.Task{
-			ID:     "task-cancel",
-			Status: a2a.TaskStatus{State: a2a.TaskStateCanceled},
+			ID:        "task-cancel",
+			ContextID: "ctx-xyz",
+			Status:    a2a.TaskStatus{State: a2a.TaskStateCanceled},
 		}
 		writeJSONRPCResult(w, req.ID, task)
 	}))
@@ -142,15 +168,30 @@ func TestGetTask_Canceled(t *testing.T) {
 	}
 
 	g := newGetTaskTool(reg, clientResolver)
-	result, _, err := g.Handle(context.Background(), nil, &GetTaskInput{
+	result, output, err := g.Handle(context.Background(), nil, &GetTaskInput{
 		Agent:  "test-agent",
 		TaskID: "task-cancel",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for canceled task")
 	}
-	if !result.IsError {
-		t.Fatal("expected IsError=true for canceled task")
+	if result != nil {
+		t.Fatalf("expected nil result when error is returned")
 	}
-	assertTextContains(t, result, "task was canceled")
+	if output == nil {
+		t.Fatal("expected non-nil output")
+	}
+	task := output.(*a2a.Task)
+	if task.ID != "task-cancel" {
+		t.Errorf("expected ID task-cancel, got %s", task.ID)
+	}
+	if task.ContextID != "ctx-xyz" {
+		t.Errorf("expected ContextID ctx-xyz, got %s", task.ContextID)
+	}
+	if task.Status.State != a2a.TaskStateCanceled {
+		t.Errorf("expected state canceled, got %s", task.Status.State)
+	}
+	if err.Error() != "task was canceled" {
+		t.Errorf("expected error message 'task was canceled', got %s", err.Error())
+	}
 }

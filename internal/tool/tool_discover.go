@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,10 +23,32 @@ type DiscoverAgentsInput struct {
 	Headers      map[string]string `json:"headers,omitempty" jsonschema:"optional HTTP headers for directory authentication (max 20 entries)"`
 }
 
+// DiscoverAgentEntry describes a single agent card returned by discover_agents.
+type DiscoverAgentEntry struct {
+	Name        string   `json:"name" jsonschema:"agent display name"`
+	Description string   `json:"description,omitempty" jsonschema:"agent description"`
+	URL         string   `json:"url,omitempty" jsonschema:"agent URL"`
+	Version     string   `json:"version,omitempty" jsonschema:"agent version"`
+	Skills      []any    `json:"skills,omitempty" jsonschema:"agent skills"`
+	InputModes  []string `json:"inputModes,omitempty" jsonschema:"supported input MIME types"`
+	OutputModes []string `json:"outputModes,omitempty" jsonschema:"supported output MIME types"`
+}
+
+// DiscoverAgentsOutput is the output schema for the discover_agents tool.
+type DiscoverAgentsOutput struct {
+	Agents []DiscoverAgentEntry `json:"agents" jsonschema:"list of discovered agent cards from the directory"`
+}
+
 // DiscoverAgentsTool queries a remote agent directory service and returns
 // the raw JSON array of agent cards.
 type DiscoverAgentsTool struct {
 	HTTPClient HTTPDoer
+}
+
+// NewDiscoverAgentsTool creates a new DiscoverAgentsTool using the HTTP client
+// provided by the given environment configuration.
+func NewDiscoverAgentsTool(env *Env) *DiscoverAgentsTool {
+	return &DiscoverAgentsTool{HTTPClient: env.HTTPDoer}
 }
 
 func (d *DiscoverAgentsTool) Tool() *mcp.Tool {
@@ -35,23 +58,23 @@ func (d *DiscoverAgentsTool) Tool() *mcp.Tool {
 	}
 }
 
-func (d *DiscoverAgentsTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *DiscoverAgentsInput) (*mcp.CallToolResult, any, error) {
+func (d *DiscoverAgentsTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *DiscoverAgentsInput) (*mcp.CallToolResult, *DiscoverAgentsOutput, error) {
 	if err := validate.URL(input.DirectoryURL); err != nil {
-		return toolError(err.Error()), nil, nil
+		return nil, nil, err
 	}
 
 	if input.Limit != nil && *input.Limit < 1 {
-		return toolError("limit must be a positive integer (>= 1)"), nil, nil
+		return nil, nil, errors.New("limit must be a positive integer (>= 1)")
 	}
 
 	if err := validate.Headers(input.Headers); err != nil {
-		return toolError(err.Error()), nil, nil
+		return nil, nil, err
 	}
 
 	// Build the GET URL with query parameters.
 	reqURL, err := url.Parse(input.DirectoryURL)
 	if err != nil {
-		return toolError(fmt.Sprintf("invalid directory URL: %v", err)), nil, nil
+		return nil, nil, fmt.Errorf("invalid directory URL: %w", err)
 	}
 
 	q := reqURL.Query()
@@ -69,7 +92,7 @@ func (d *DiscoverAgentsTool) Handle(ctx context.Context, _ *mcp.CallToolRequest,
 
 	req, err := http.NewRequestWithContext(timeoutCtx, http.MethodGet, reqURL.String(), nil)
 	if err != nil {
-		return toolError(fmt.Sprintf("failed to create request: %v", err)), nil, nil
+		return nil, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Accept", "application/json")
@@ -86,30 +109,29 @@ func (d *DiscoverAgentsTool) Handle(ctx context.Context, _ *mcp.CallToolRequest,
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "context deadline exceeded") {
-			return toolError("directory is unreachable: request timed out"), nil, nil
+			return nil, nil, errors.New("directory is unreachable: request timed out")
 		}
-		return toolError(fmt.Sprintf("directory is unreachable: %v", err)), nil, nil
+		return nil, nil, fmt.Errorf("directory is unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return toolError(fmt.Sprintf("failed to read directory response: %v", err)), nil, nil
+		return nil, nil, fmt.Errorf("failed to read directory response: %w", err)
 	}
 
 	if !json.Valid(body) {
-		return toolError("directory response is not valid JSON"), nil, nil
+		return nil, nil, errors.New("directory response is not valid JSON")
 	}
 
-	// Validate that the response is a JSON array.
-	var arr []json.RawMessage
-	if err := json.Unmarshal(body, &arr); err != nil {
-		return toolError("directory response is not a JSON array"), nil, nil
+	// Parse into output struct
+	var agents []DiscoverAgentEntry
+	if err := json.Unmarshal(body, &agents); err != nil {
+		return nil, nil, errors.New("directory response is not a valid agent array")
 	}
 
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
-	}, nil, nil
+	output := &DiscoverAgentsOutput{Agents: agents}
+	return nil, output, nil
 }
 
 // isProtocolHeader returns true for headers that must not be overridden.

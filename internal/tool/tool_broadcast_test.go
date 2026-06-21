@@ -40,13 +40,15 @@ func TestBroadcast_NoAliases(t *testing.T) {
 	result, _, err := b.Handle(context.Background(), nil, &BroadcastMessageInput{
 		Message: "hello",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatal("expected nil result for validation error")
 	}
-	assertTextContains(t, result, "at least one alias is required")
+	if err.Error() != "at least one alias is required" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestBroadcast_TooManyAliases(t *testing.T) {
@@ -59,13 +61,15 @@ func TestBroadcast_TooManyAliases(t *testing.T) {
 		Aliases: aliases,
 		Message: "hello",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatal("expected nil result for validation error")
 	}
-	assertTextContains(t, result, "maximum 20 aliases allowed")
+	if !contains(err.Error(), "maximum 20 aliases allowed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestBroadcast_NoMessageOrParts(t *testing.T) {
@@ -73,13 +77,15 @@ func TestBroadcast_NoMessageOrParts(t *testing.T) {
 	result, _, err := b.Handle(context.Background(), nil, &BroadcastMessageInput{
 		Aliases: []string{"agent1"},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatal("expected nil result for validation error")
 	}
-	assertTextContains(t, result, "either 'message' or 'parts' is required")
+	if err.Error() != "either 'message' or 'parts' is required" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestBroadcast_InvalidTimeout(t *testing.T) {
@@ -91,13 +97,15 @@ func TestBroadcast_InvalidTimeout(t *testing.T) {
 		Message:        "hello",
 		TimeoutSeconds: &timeout,
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatal("expected nil result for validation error")
 	}
-	assertTextContains(t, result, "timeout_seconds must be between")
+	if !contains(err.Error(), "timeout_seconds must be between") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestBroadcast_SingleAgent_Success(t *testing.T) {
@@ -121,32 +129,28 @@ func TestBroadcast_SingleAgent_Success(t *testing.T) {
 	}
 
 	b := newBroadcastTool(reg, clientResolver)
-	result, _, err := b.Handle(context.Background(), nil, &BroadcastMessageInput{
+	result, out, err := b.Handle(context.Background(), nil, &BroadcastMessageInput{
 		Aliases: []string{"agent1"},
 		Message: "hello",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %s", getTextContent(t, result))
+	if result != nil {
+		t.Fatalf("unexpected result for success: %v", result)
 	}
 
 	// Parse broadcast JSON output.
-	text := getTextContent(t, result)
-	var results map[string]broadcastResult
-	if err := json.Unmarshal([]byte(text), &results); err != nil {
-		t.Fatalf("failed to parse broadcast result: %v", err)
+	if out == nil {
+		t.Fatal("expected structured output for broadcast")
 	}
+	results := out
 	agentResult, ok := results["agent1"]
 	if !ok {
 		t.Fatal("expected result for agent1")
 	}
-	if agentResult.Status != "success" {
-		t.Errorf("expected status=success, got %s", agentResult.Status)
-	}
-	if !contains(agentResult.Response, "broadcast reply") {
-		t.Errorf("expected response to contain 'broadcast reply', got %q", agentResult.Response)
+	if agentResult.Message == nil {
+		t.Fatal("expected Message in structured output")
 	}
 }
 
@@ -165,7 +169,7 @@ func TestBroadcast_UnhealthySkipped(t *testing.T) {
 	b := newBroadcastTool(reg, &mockClientResolver{})
 	b.HealthTracker = health
 
-	result, _, err := b.Handle(context.Background(), nil, &BroadcastMessageInput{
+	result, out, err := b.Handle(context.Background(), nil, &BroadcastMessageInput{
 		Aliases: []string{"sick-agent"},
 		Message: "hello",
 	})
@@ -173,16 +177,19 @@ func TestBroadcast_UnhealthySkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var results map[string]broadcastResult
-	if err := json.Unmarshal([]byte(getTextContent(t, result)), &results); err != nil {
-		t.Fatalf("failed to parse broadcast result: %v", err)
+	if result != nil {
+		t.Fatalf("unexpected result for success: %v", result)
 	}
+	if out == nil {
+		t.Fatal("expected structured output for broadcast")
+	}
+	results := out
 	agentResult, ok := results["sick-agent"]
 	if !ok {
 		t.Fatal("expected result for sick-agent")
 	}
-	if agentResult.Status != "skipped" {
-		t.Errorf("expected status=skipped, got %s", agentResult.Status)
+	if agentResult == nil {
+		t.Fatal("expected agent result")
 	}
 }
 

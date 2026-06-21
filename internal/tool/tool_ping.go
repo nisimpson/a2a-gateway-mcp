@@ -2,7 +2,7 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,11 +15,11 @@ type PingAgentInput struct {
 	Alias string `json:"alias" jsonschema:"alias of the agent to ping (lowercase alphanumeric and hyphens, max 64 chars)"`
 }
 
-// PingAgentOutput is the structured output for ping_agent.
+// PingAgentOutput is the output schema for the ping_agent tool.
 type PingAgentOutput struct {
-	Reachable    bool   `json:"reachable"`
-	Health       string `json:"health"`
-	ResponseTime *int   `json:"response_time_ms,omitempty"`
+	Reachable    bool   `json:"reachable" jsonschema:"whether the agent responded to the ping"`
+	Health       string `json:"health" jsonschema:"health status after ping (healthy, unhealthy, unknown)"`
+	ResponseTime *int   `json:"response_time_ms,omitempty" jsonschema:"response time in milliseconds (only present when reachable)"`
 }
 
 const pingTimeout = 5 * time.Second
@@ -31,6 +31,18 @@ type PingAgentTool struct {
 	PingStrategy  PingStrategy
 }
 
+// NewPingAgentTool creates a PingAgentTool wired with dependencies from the
+// shared environment. It uses the registry to resolve agent aliases, the health
+// tracker to record liveness state, and the ping strategy to execute the
+// actual connectivity check.
+func NewPingAgentTool(env *Env) *PingAgentTool {
+	return &PingAgentTool{
+		AgentRegistry: env.AgentRegistry,
+		HealthTracker: env.HealthTracker,
+		PingStrategy:  env.PingStrategy,
+	}
+}
+
 func (p *PingAgentTool) Tool() *mcp.Tool {
 	return &mcp.Tool{
 		Name:        "ping_agent",
@@ -38,14 +50,14 @@ func (p *PingAgentTool) Tool() *mcp.Tool {
 	}
 }
 
-func (p *PingAgentTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *PingAgentInput) (*mcp.CallToolResult, any, error) {
+func (p *PingAgentTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input *PingAgentInput) (*mcp.CallToolResult, *PingAgentOutput, error) {
 	if input.Alias == "" {
-		return toolError("alias is required"), nil, nil
+		return nil, nil, errors.New("alias is required")
 	}
 
 	entry := p.AgentRegistry.Lookup(input.Alias)
 	if entry == nil {
-		return toolError(fmt.Sprintf("agent %q not found in registry", input.Alias)), nil, nil
+		return nil, nil, fmt.Errorf("agent %q not found in registry", input.Alias)
 	}
 
 	// Execute ping with a fixed timeout.
@@ -77,14 +89,7 @@ func (p *PingAgentTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, inpu
 		output.ResponseTime = &ms
 	}
 
-	data, err := json.Marshal(output)
-	if err != nil {
-		return toolError(fmt.Sprintf("failed to marshal ping response: %v", err)), nil, nil
-	}
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
-	}, nil, nil
+	return nil, &output, nil
 }
 
 // updateHealth classifies the ping outcome and records health state.

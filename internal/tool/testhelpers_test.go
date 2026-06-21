@@ -9,7 +9,6 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/history"
 )
 
@@ -124,7 +123,7 @@ func (m *mockHealthTracker) GetFailures(alias string) (int, bool) {
 
 type mockRateLimiter struct {
 	AllowFn          func(alias string) bool
-	CheckRateLimitFn func(alias string) *mcp.CallToolResult
+	CheckRateLimitFn func(alias string) error
 	SetFn            func(alias string, rps float64, burst int)
 	RemoveFn         func(alias string)
 	GetFn            func(alias string) (float64, int, bool)
@@ -136,7 +135,7 @@ func (m *mockRateLimiter) Allow(alias string) bool {
 	}
 	return true
 }
-func (m *mockRateLimiter) CheckRateLimit(alias string) *mcp.CallToolResult {
+func (m *mockRateLimiter) CheckRateLimit(alias string) error {
 	if m.CheckRateLimitFn != nil {
 		return m.CheckRateLimitFn(alias)
 	}

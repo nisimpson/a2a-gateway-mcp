@@ -32,12 +32,12 @@ func (r Recorder) Record(ctx context.Context, input RecordInput) {
 	}
 
 	entry := Entry{
-		Timestamp: time.Now().UTC(),
-		SentMsg:   truncateText(input.Sent, r.MaxEntryLength),
-		Response:  truncateText(input.Response, r.MaxEntryLength),
-		ContextID: input.ContextID,
-		TaskID:    input.TaskID,
-		IsError:   input.IsError,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		SentMessage: truncateText(input.Sent, r.MaxEntryLength),
+		Response:    truncateText(input.Response, r.MaxEntryLength),
+		ContextID:   input.ContextID,
+		TaskID:      input.TaskID,
+		IsError:     input.IsError,
 	}
 
 	if err := r.Append(ctx, input.Alias, entry); err != nil {

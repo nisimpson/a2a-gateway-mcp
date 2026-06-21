@@ -66,8 +66,8 @@ func TestGetHistory_Success(t *testing.T) {
 	now := time.Now()
 	hb.ListFn = func(_ context.Context, alias string) ([]history.Entry, error) {
 		return []history.Entry{
-			{Timestamp: now, SentMsg: "hello", Response: "world"},
-			{Timestamp: now.Add(time.Second), SentMsg: "foo", Response: "bar"},
+			{Timestamp: now.Format(time.RFC3339), SentMessage: "hello", Response: "world"},
+			{Timestamp: now.Add(time.Second).Format(time.RFC3339), SentMessage: "foo", Response: "bar"},
 		}, nil
 	}
 
@@ -91,8 +91,8 @@ func TestGetHistory_Success(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(entries))
 	}
-	if entries[0].SentMsg != "hello" {
-		t.Errorf("expected first entry sent_message='hello', got %q", entries[0].SentMsg)
+	if entries[0].SentMessage != "hello" {
+		t.Errorf("expected first entry sent_message='hello', got %q", entries[0].SentMessage)
 	}
 }
 
@@ -106,9 +106,9 @@ func TestGetHistory_WithLimit(t *testing.T) {
 	now := time.Now()
 	hb.ListFn = func(_ context.Context, alias string) ([]history.Entry, error) {
 		return []history.Entry{
-			{Timestamp: now, SentMsg: "first", Response: "r1"},
-			{Timestamp: now.Add(time.Second), SentMsg: "second", Response: "r2"},
-			{Timestamp: now.Add(2 * time.Second), SentMsg: "third", Response: "r3"},
+			{Timestamp: now.Format(time.RFC3339), SentMessage: "first", Response: "r1"},
+			{Timestamp: now.Add(time.Second).Format(time.RFC3339), SentMessage: "second", Response: "r2"},
+			{Timestamp: now.Add(2 * time.Second).Format(time.RFC3339), SentMessage: "third", Response: "r3"},
 		}, nil
 	}
 
@@ -134,11 +134,11 @@ func TestGetHistory_WithLimit(t *testing.T) {
 		t.Fatalf("expected 2 entries after limit, got %d", len(entries))
 	}
 	// Should return the most recent 2.
-	if entries[0].SentMsg != "second" {
-		t.Errorf("expected 'second', got %q", entries[0].SentMsg)
+	if entries[0].SentMessage != "second" {
+		t.Errorf("expected 'second', got %q", entries[0].SentMessage)
 	}
-	if entries[1].SentMsg != "third" {
-		t.Errorf("expected 'third', got %q", entries[1].SentMsg)
+	if entries[1].SentMessage != "third" {
+		t.Errorf("expected 'third', got %q", entries[1].SentMessage)
 	}
 }
 

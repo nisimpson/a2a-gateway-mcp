@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -59,17 +60,33 @@ type SendMessageOutput struct {
 
 // SendMessageTool sends a message to a connected A2A agent.
 type SendMessageTool struct {
-	AgentRegistry        AgentRegistry
-	A2AClientResolver    A2AClientResolver
-	ContextStore         ContextStore
-	CallerCardInjector   CallerCardInjector
-	HealthTracker        HealthTracker
-	HistoryRecorder      HistoryRecorder
-	RateLimiter          RateLimiter
-	StreamTimeout        time.Duration
-	EffectivePollTimeout func(requestSeconds *int) time.Duration
+	AgentRegistry          AgentRegistry
+	A2AClientResolver      A2AClientResolver
+	ContextStore           ContextStore
+	CallerCardInjector     CallerCardInjector
+	HealthTracker          HealthTracker
+	HistoryRecorder        HistoryRecorder
+	RateLimiter            RateLimiter
+	EffectivePollTimeout   EffectiveTimeoutFunc
+	EffectiveStreamTimeout EffectiveTimeoutFunc
 }
 
+// NewSendMessageTool constructs a SendMessageTool with all dependencies
+// wired from the shared Env configuration. The returned tool is ready to be
+// registered with the MCP server for handling send_message requests.
+func NewSendMessageTool(env *Env) *SendMessageTool {
+	return &SendMessageTool{
+		AgentRegistry:          env.AgentRegistry,
+		A2AClientResolver:      env.A2AClientResolver,
+		ContextStore:           env.ContextStore,
+		CallerCardInjector:     env.CallerCardInjector,
+		HealthTracker:          env.HealthTracker,
+		HistoryRecorder:        env.HistoryRecorder,
+		RateLimiter:            env.RateLimiter,
+		EffectivePollTimeout:   env.EffectivePollTimeout,
+		EffectiveStreamTimeout: env.EffectiveStreamTimeout,
+	}
+}
 func (s *SendMessageTool) Tool() *mcp.Tool {
 	return &mcp.Tool{
 		Name: "send_message",
@@ -92,10 +109,10 @@ type sendRequest struct {
 }
 
 // Handle sends a message to a connected A2A agent by alias or URL.
-func (s *SendMessageTool) Handle(ctx context.Context, req *mcp.CallToolRequest, input *SendMessageInput) (*mcp.CallToolResult, any, error) {
-	sr, errResult := s.buildSendRequest(ctx, input)
-	if errResult != nil {
-		return errResult, nil, nil
+func (s *SendMessageTool) Handle(ctx context.Context, req *mcp.CallToolRequest, input *SendMessageInput) (*mcp.CallToolResult, *SendMessageOutput, error) {
+	sr, err := s.buildSendRequest(ctx, input)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// Route to streaming or direct path.
@@ -108,24 +125,24 @@ func (s *SendMessageTool) Handle(ctx context.Context, req *mcp.CallToolRequest, 
 // buildSendRequest validates input, resolves the agent, checks rate limits,
 // builds the A2A message, and resolves the SDK client. Returns an error result
 // if any step fails.
-func (s *SendMessageTool) buildSendRequest(ctx context.Context, input *SendMessageInput) (*sendRequest, *mcp.CallToolResult) {
+func (s *SendMessageTool) buildSendRequest(ctx context.Context, input *SendMessageInput) (*sendRequest, error) {
 	if input.Agent == "" {
-		return nil, toolError("agent identifier is required")
+		return nil, errors.New("agent identifier is required")
 	}
 
 	contentParts, err := buildMessageParts(input.Message, input.Parts)
 	if err != nil {
-		return nil, toolError(err.Error())
+		return nil, err
 	}
 
 	resolved, err := s.AgentRegistry.ResolveAgent(input.Agent)
 	if err != nil {
-		return nil, toolError(err.Error())
+		return nil, err
 	}
 
 	if resolved.IsAlias {
-		if result := s.RateLimiter.CheckRateLimit(resolved.Alias); result != nil {
-			return nil, result
+		if err := s.RateLimiter.CheckRateLimit(resolved.Alias); err != nil {
+			return nil, fmt.Errorf("rate limited: %w", err)
 		}
 	}
 
@@ -159,13 +176,12 @@ func (s *SendMessageTool) buildSendRequest(ctx context.Context, input *SendMessa
 }
 
 // sendViaStreaming handles the streaming transport path.
-func (s *SendMessageTool) sendViaStreaming(ctx context.Context, req *mcp.CallToolRequest, input *SendMessageInput, sr *sendRequest) (*mcp.CallToolResult, any, error) {
+func (s *SendMessageTool) sendViaStreaming(ctx context.Context, req *mcp.CallToolRequest, input *SendMessageInput, sr *sendRequest) (*mcp.CallToolResult, *SendMessageOutput, error) {
 	result, structured, err := handleStreamingMessage(ctx, req, s.ContextStore, sr.client, sr.request, sr.resolved, input.Agent, s.effectiveStreamTimeout(input.PollTimeoutSeconds))
 	if err != nil {
 		s.recordHealthOutcome(sr.resolved, err)
-		errResult := handleA2AError(err)
-		s.recordHistory(ctx, input, errResult, nil)
-		return errResult, nil, nil
+		s.recordHistory(ctx, input, nil, nil)
+		return nil, nil, err
 	}
 
 	if sr.resolved.IsAlias {
@@ -176,13 +192,12 @@ func (s *SendMessageTool) sendViaStreaming(ctx context.Context, req *mcp.CallToo
 }
 
 // sendDirect handles the non-streaming (request/response) transport path.
-func (s *SendMessageTool) sendDirect(ctx context.Context, input *SendMessageInput, sr *sendRequest) (*mcp.CallToolResult, any, error) {
+func (s *SendMessageTool) sendDirect(ctx context.Context, input *SendMessageInput, sr *sendRequest) (*mcp.CallToolResult, *SendMessageOutput, error) {
 	response, err := sr.client.SendMessage(ctx, sr.request)
 	if err != nil {
 		s.recordHealthOutcome(sr.resolved, err)
-		errResult := handleA2AError(err)
-		s.recordHistory(ctx, input, errResult, nil)
-		return errResult, nil, nil
+		s.recordHistory(ctx, input, nil, nil)
+		return nil, nil, handleA2AError(err)
 	}
 
 	if sr.resolved.IsAlias {
@@ -193,7 +208,7 @@ func (s *SendMessageTool) sendDirect(ctx context.Context, input *SendMessageInpu
 }
 
 // processResponse handles the A2A response type switch for the direct path.
-func (s *SendMessageTool) processResponse(ctx context.Context, input *SendMessageInput, sr *sendRequest, response a2a.SendMessageResult) (*mcp.CallToolResult, any, error) {
+func (s *SendMessageTool) processResponse(ctx context.Context, input *SendMessageInput, sr *sendRequest, response a2a.SendMessageResult) (*mcp.CallToolResult, *SendMessageOutput, error) {
 	switch v := response.(type) {
 	case *a2a.Task:
 		pollTimeout := s.EffectivePollTimeout(input.PollTimeoutSeconds)
@@ -204,13 +219,13 @@ func (s *SendMessageTool) processResponse(ctx context.Context, input *SendMessag
 		if sr.resolved.IsAlias && v.ContextID != "" {
 			s.ContextStore.Set(input.Agent, v.ContextID)
 		}
-		msgResult, structured := formatMessageResponse(v)
-		s.recordHistory(ctx, input, msgResult, structured)
-		return msgResult, structured, nil
+		structured := formatMessageResponse(v)
+		s.recordHistory(ctx, input, nil, structured)
+		return nil, structured, nil
 	default:
-		result := toolError("unrecognized response format: expected Task or Message")
-		s.recordHistory(ctx, input, result, nil)
-		return result, nil, nil
+		err := errors.New("unrecognized response format: expected Task or Message")
+		s.recordHistory(ctx, input, nil, nil)
+		return nil, nil, err
 	}
 }
 
@@ -241,15 +256,7 @@ func (s *SendMessageTool) recordHistory(ctx context.Context, input *SendMessageI
 // Per-request PollTimeoutSeconds takes precedence over the server default.
 // A negative value means no timeout (wait indefinitely).
 func (s *SendMessageTool) effectiveStreamTimeout(requestSeconds *int) time.Duration {
-	if requestSeconds != nil {
-		if *requestSeconds < 0 {
-			return 0 // sentinel: no timeout
-		}
-		if *requestSeconds > 0 {
-			return time.Duration(*requestSeconds) * time.Second
-		}
-	}
-	return s.StreamTimeout
+	return s.EffectiveStreamTimeout(requestSeconds)
 }
 
 // extractResultText extracts the primary response text from a CallToolResult.
@@ -363,22 +370,19 @@ func (s *SendMessageTool) handleTaskResult(ctx context.Context, a2aClient *a2acl
 		if resolved.IsAlias && task.ContextID != "" {
 			s.ContextStore.Set(agent, task.ContextID)
 		}
-		result, structured := FormatTaskResponse(task)
-		return result, structured, nil
+		return nil, formatTaskResponse(task), nil
 
 	case a2a.TaskStateInputRequired:
 		if resolved.IsAlias && task.ContextID != "" {
 			s.ContextStore.Set(agent, task.ContextID)
 		}
-		result, structured := FormatInputRequiredResponse(task)
-		return result, structured, nil
+		return nil, formatInputRequiredResponse(task), nil
 
 	case a2a.TaskStateAuthRequired:
 		if resolved.IsAlias && task.ContextID != "" {
 			s.ContextStore.Set(agent, task.ContextID)
 		}
-		result, structured := formatInterruptedResponse(task, "auth-required")
-		return result, structured, nil
+		return nil, formatInterruptedResponse(task, "auth-required"), nil
 
 	case a2a.TaskStateFailed:
 		// Requirement: SRES-3.3 — failed task returns structured content with isError
@@ -392,20 +396,14 @@ func (s *SendMessageTool) handleTaskResult(ctx context.Context, a2aClient *a2acl
 				failMsg = text
 			}
 		}
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: failMsg}},
-		}, &SendMessageOutput{Task: task}, nil
+		return nil, &SendMessageOutput{Task: task}, errors.New(failMsg)
 
 	case a2a.TaskStateCanceled:
 		// Requirement: SRES-3.4 — canceled task returns structured content with isError
 		if resolved.IsAlias && task.ContextID != "" {
 			s.ContextStore.Set(agent, task.ContextID)
 		}
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: "task was canceled by the agent"}},
-		}, &SendMessageOutput{Task: task}, nil
+		return nil, &SendMessageOutput{Task: task}, errors.New("task was canceled by the agent")
 
 	case a2a.TaskStateWorking, a2a.TaskStateSubmitted:
 		// Known non-terminal states — poll for completion if task has an ID.
@@ -413,19 +411,13 @@ func (s *SendMessageTool) handleTaskResult(ctx context.Context, a2aClient *a2acl
 			if resolved.IsAlias && task.ContextID != "" {
 				s.ContextStore.Set(agent, task.ContextID)
 			}
-			return &mcp.CallToolResult{
-				IsError: true,
-				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("agent returned non-terminal state %q without a task ID; cannot poll for completion", task.Status.State)}},
-			}, nil, nil
+			return nil, nil, fmt.Errorf("agent returned non-terminal state %q without a task ID; cannot poll for completion", task.Status.State)
 		}
 
 		// Poll for non-terminal states up to the configured timeout.
 		polledTask, err := s.pollTaskCompletion(ctx, a2aClient, task.ID, pollTimeout)
 		if err != nil {
-			return &mcp.CallToolResult{
-				IsError: true,
-				Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
-			}, nil, nil
+			return nil, nil, err
 		}
 
 		// Requirement: SRES-1.5 — polled task returns structured content
@@ -435,14 +427,11 @@ func (s *SendMessageTool) handleTaskResult(ctx context.Context, a2aClient *a2acl
 		}
 		switch polledTask.Status.State {
 		case a2a.TaskStateCompleted:
-			result, structured := FormatTaskResponse(polledTask)
-			return result, structured, nil
+			return nil, formatTaskResponse(polledTask), nil
 		case a2a.TaskStateInputRequired:
-			result, structured := FormatInputRequiredResponse(polledTask)
-			return result, structured, nil
+			return nil, formatInputRequiredResponse(polledTask), nil
 		case a2a.TaskStateAuthRequired:
-			result, structured := formatInterruptedResponse(polledTask, "auth-required")
-			return result, structured, nil
+			return nil, formatInterruptedResponse(polledTask, "auth-required"), nil
 		case a2a.TaskStateFailed:
 			failMsg := "task failed"
 			if polledTask.Status.Message != nil {
@@ -451,20 +440,11 @@ func (s *SendMessageTool) handleTaskResult(ctx context.Context, a2aClient *a2acl
 					failMsg = text
 				}
 			}
-			return &mcp.CallToolResult{
-				IsError: true,
-				Content: []mcp.Content{&mcp.TextContent{Text: failMsg}},
-			}, &SendMessageOutput{Task: polledTask}, nil
+			return nil, &SendMessageOutput{Task: polledTask}, errors.New(failMsg)
 		case a2a.TaskStateCanceled:
-			return &mcp.CallToolResult{
-				IsError: true,
-				Content: []mcp.Content{&mcp.TextContent{Text: "task was canceled by the agent"}},
-			}, &SendMessageOutput{Task: polledTask}, nil
+			return nil, &SendMessageOutput{Task: polledTask}, errors.New("task was canceled by the agent")
 		default:
-			return &mcp.CallToolResult{
-				IsError: true,
-				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("timeout waiting for task completion (state: %s)", polledTask.Status.State)}},
-			}, &SendMessageOutput{Task: polledTask}, nil
+			return nil, &SendMessageOutput{Task: polledTask}, errors.New(fmt.Sprintf("timeout waiting for task completion (state: %s)", polledTask.Status.State))
 		}
 
 	default:
@@ -472,10 +452,7 @@ func (s *SendMessageTool) handleTaskResult(ctx context.Context, a2aClient *a2acl
 		if resolved.IsAlias && task.ContextID != "" {
 			s.ContextStore.Set(agent, task.ContextID)
 		}
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("agent returned unrecognized task state %q — ensure the agent supports A2A protocol v1.0 or later", task.Status.State)}},
-		}, nil, nil
+		return nil, nil, fmt.Errorf("agent returned unrecognized task state %q — ensure the agent supports A2A protocol v1.0 or later", task.Status.State)
 	}
 }
 

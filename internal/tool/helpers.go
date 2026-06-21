@@ -87,25 +87,16 @@ func extractTaskResponseText(task *a2a.Task) string {
 	return extractContentFromArtifacts(task.Artifacts)
 }
 
-// toolError is a convenience for constructing an error CallToolResult.
-func toolError(msg string) *mcp.CallToolResult {
-	return &mcp.CallToolResult{
-		IsError: true,
-		Content: []mcp.Content{&mcp.TextContent{Text: msg}},
-	}
-}
-
-// handleA2AError classifies an error returned by the a2aclient SDK and
-// returns an appropriate MCP error result. It uses errors.Is to match
-// sentinel errors from the SDK.
-func handleA2AError(err error) *mcp.CallToolResult {
+// handleA2AError classifies an error returned by the a2aclient SDK.
+// The MCP library will convert this to an error result.
+func handleA2AError(err error) error {
 	switch {
 	case errors.Is(err, a2a.ErrTaskNotFound):
-		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "task not found"}}}
+		return errors.New("task not found")
 	case errors.Is(err, a2a.ErrTaskNotCancelable):
-		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "task is not cancelable"}}}
+		return errors.New("task is not cancelable")
 	default:
-		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}
+		return err
 	}
 }
 
@@ -175,8 +166,7 @@ func buildTaskFromState(state *streamState) *a2a.Task {
 
 // handleStreamingMessage calls SendStreamingMessage and consumes the event
 // iterator until a terminal/interrupted state is reached or timeout expires.
-// It accumulates artifacts from TaskArtifactUpdateEvent events and constructs
-// the final response using the same format functions as the polling path.
+// Returns structured output only (no MCP CallToolResult).
 func handleStreamingMessage(
 	ctx context.Context,
 	req *mcp.CallToolRequest,
@@ -240,7 +230,6 @@ func handleStreamingMessage(
 	var contextID string
 
 	// Handle the stream result based on terminal condition type.
-	var mcpResult *mcp.CallToolResult
 	var structured *SendMessageOutput
 
 	// Requirement: SRES-5.1, SRES-5.2, SRES-5.3 — streaming produces same structured content format
@@ -248,18 +237,18 @@ func handleStreamingMessage(
 	case result.task != nil:
 		// A full *a2a.Task event terminated the stream.
 		contextID = result.task.ContextID
-		mcpResult, structured = formatStreamTask(result.task)
+		structured = formatStreamTask(result.task)
 
 	case result.message != nil:
 		// A *a2a.Message event terminated the stream.
 		contextID = result.message.ContextID
-		mcpResult, structured = formatMessageResponse(result.message)
+		structured = formatMessageResponse(result.message)
 
 	case result.terminatedByStatus:
 		// A terminal TaskStatusUpdateEvent terminated the stream.
 		task := buildTaskFromState(result.state)
 		contextID = task.ContextID
-		mcpResult, structured = formatStreamTask(task)
+		structured = formatStreamTask(task)
 	}
 
 	// Requirement: STRM-4.1, STRM-4.4 — store context_id for alias-based agents.
@@ -270,54 +259,35 @@ func handleStreamingMessage(
 		store.Set(agent, contextID)
 	}
 
-	return mcpResult, structured, nil
+	return nil, structured, nil
 }
 
 // formatStreamTask applies the same task-state-based formatting as the
-// polling path: completed → FormatTaskResponse, input-required →
-// FormatInputRequiredResponse, auth-required → FormatInterruptedResponse,
-// failed/canceled/rejected → error result with task as structured content.
-func formatStreamTask(task *a2a.Task) (*mcp.CallToolResult, *SendMessageOutput) {
+// polling path: completed → formatTaskResponse, input-required →
+// formatInputRequiredResponse, auth-required → formatInterruptedResponse,
+// failed/canceled/rejected → structured output with task.
+func formatStreamTask(task *a2a.Task) *SendMessageOutput {
 	switch task.Status.State {
 	case a2a.TaskStateCompleted:
-		return FormatTaskResponse(task)
+		return formatTaskResponse(task)
 
 	case a2a.TaskStateInputRequired:
-		return FormatInputRequiredResponse(task)
+		return formatInputRequiredResponse(task)
 
 	case a2a.TaskStateAuthRequired:
 		return formatInterruptedResponse(task, "auth-required")
 
 	case a2a.TaskStateFailed:
-		failMsg := "task failed"
-		if task.Status.Message != nil {
-			text := extractStatusMessageText(task.Status.Message)
-			if text != "" {
-				failMsg = text
-			}
-		}
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: failMsg}},
-		}, &SendMessageOutput{Task: task}
+		return &SendMessageOutput{Task: task}
 
 	case a2a.TaskStateCanceled:
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: "task was canceled by the agent"}},
-		}, &SendMessageOutput{Task: task}
+		return &SendMessageOutput{Task: task}
 
 	case a2a.TaskStateRejected:
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: "task was rejected by the agent"}},
-		}, &SendMessageOutput{Task: task}
+		return &SendMessageOutput{Task: task}
 
 	default:
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("agent returned unrecognized task state %q — ensure the agent supports A2A protocol v1.0 or later", task.Status.State)}},
-		}, &SendMessageOutput{Task: task}
+		return &SendMessageOutput{Task: task}
 	}
 }
 
@@ -436,25 +406,15 @@ func renderPart(part *a2a.Part) (string, bool) {
 	}
 }
 
-// formatMessageResponse formats an a2a.Message response as MCP content items.
-// The second return value is a *SendMessageOutput wrapping the message for
-// use as structured content.
+// formatMessageResponse formats an a2a.Message response as structured output.
 //
 // Behavior:
 //   - Renders all parts (Text, Data, URL, Raw) using renderPart, concatenated in order.
 //   - If the message has zero parts, returns empty text.
 //   - Metadata (context_id) is available via the structured *SendMessageOutput;
-//     only human-readable response text is included in content.
-//
-// Content ordering: [response text]
-func formatMessageResponse(msg *a2a.Message) (*mcp.CallToolResult, *SendMessageOutput) {
+func formatMessageResponse(msg *a2a.Message) *SendMessageOutput {
 	// Requirement: SRES-2.1, SRES-2.2 — return raw message as structured content
-	result := &mcp.CallToolResult{}
-
-	text := extractContentFromMessageParts(msg.Parts)
-	result.Content = append(result.Content, &mcp.TextContent{Text: text})
-
-	return result, &SendMessageOutput{Message: msg}
+	return &SendMessageOutput{Message: msg}
 }
 
 // extractContentFromMessageParts renders all parts using renderPart and
@@ -472,73 +432,33 @@ func extractContentFromMessageParts(parts a2a.ContentParts) string {
 }
 
 // formatInterruptedResponse formats a response for a task in an interrupted
-// state (e.g. input-required, auth-required). The second return value is a
-// *SendMessageOutput wrapping the task for use as structured content. It includes:
-//   - The agent's status message (explaining what input is needed), or
-//     artifact content if available.
-//   - A "state:<stateName>" indicator so human readers can see the interrupted state.
-//
-// Metadata (task_id, context_id) is available via the structured *SendMessageOutput;
-// only human-readable content is included in the content array.
-//
-// Content ordering: [response text, state indicator]
-func formatInterruptedResponse(task *a2a.Task, stateName string) (*mcp.CallToolResult, *SendMessageOutput) {
+// state (e.g. input-required, auth-required). Returns structured output
+// wrapping the task. It includes the agent's status message (explaining what
+// input is needed) or artifact content if available.
+func formatInterruptedResponse(task *a2a.Task, stateName string) *SendMessageOutput {
 	// Requirement: SRES-3.1, SRES-3.2 — structured content for interrupted states
-	result := &mcp.CallToolResult{}
-
-	// Prefer status message text (agents typically explain what they need here).
-	var responseText string
-	if task.Status.Message != nil {
-		responseText = extractStatusMessageText(task.Status.Message)
-	}
-
-	// Fall back to artifact content if no status message.
-	if responseText == "" {
-		responseText = extractContentFromArtifacts(task.Artifacts)
-	}
-
-	if responseText != "" {
-		result.Content = append(result.Content, &mcp.TextContent{Text: responseText})
-	}
-
-	// Include task state so callers can programmatically detect the interrupted state.
-	result.Content = append(result.Content, &mcp.TextContent{
-		Text: "state:" + stateName,
-	})
-
-	return result, &SendMessageOutput{Task: task}
+	return &SendMessageOutput{Task: task}
 }
 
-// FormatInputRequiredResponse formats a response for a task in the
+// formatInputRequiredResponse formats a response for a task in the
 // input-required state. This is a convenience wrapper around
-// FormatInterruptedResponse. The second return value is a *SendMessageOutput
-// wrapping the task for use as structured content.
-func FormatInputRequiredResponse(task *a2a.Task) (*mcp.CallToolResult, *SendMessageOutput) {
+// formatInterruptedResponse.
+func formatInputRequiredResponse(task *a2a.Task) *SendMessageOutput {
 	// Requirement: SRES-3.1 — structured content for input-required state
 	return formatInterruptedResponse(task, "input-required")
 }
 
-// FormatTaskResponse extracts content from an A2A Task and formats it
-// as MCP CallToolResult content items. The second return value is a
-// *SendMessageOutput wrapping the task for use as structured content.
+// formatTaskResponse extracts content from an A2A Task and formats it
+// as structured output.
 //
 // Behavior:
 //   - Renders all parts (Text, Data, URL, Raw) from artifacts using renderPart.
 //   - Parts within the same artifact are concatenated with no separator.
 //   - Content from different artifacts is separated by newline.
 //   - If the task has no artifacts or artifacts with no parts, returns empty text.
-//   - Metadata (task_id, context_id) is available via the structured *SendMessageOutput;
-//     only human-readable response text is included in content.
-//
-// Content ordering: [response text]
-func FormatTaskResponse(task *a2a.Task) (*mcp.CallToolResult, *SendMessageOutput) {
+func formatTaskResponse(task *a2a.Task) *SendMessageOutput {
 	// Requirement: SRES-1.1, SRES-1.3, SRES-6.3 — return raw task as structured content
-	result := &mcp.CallToolResult{}
-
-	text := extractContentFromArtifacts(task.Artifacts)
-	result.Content = append(result.Content, &mcp.TextContent{Text: text})
-
-	return result, &SendMessageOutput{Task: task}
+	return &SendMessageOutput{Task: task}
 }
 
 // extractContentFromArtifacts renders all parts from all artifacts using renderPart.
