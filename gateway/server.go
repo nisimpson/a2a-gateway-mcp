@@ -13,6 +13,8 @@ const (
 	defaultServerName    = "a2a-gateway-mcp"
 	defaultServerVersion = "0.1.0"
 	defaultHTTPTimeout   = 30 * time.Second
+	taskPollTimeout      = 60 * time.Second
+	defaultStreamTimeout = 60 * time.Second
 )
 
 // HealthCheckOptions configures the health tracking subsystem.
@@ -291,4 +293,19 @@ func (s *Server) effectivePollTimeout(requestSeconds *int) time.Duration {
 		}
 	}
 	return s.pollTimeout
+}
+
+// effectiveStreamTimeout returns the stream timeout to use for a request.
+// Per-request PollTimeoutSeconds takes precedence over the server default.
+// A negative value means no timeout (wait indefinitely).
+func (s *Server) effectiveStreamTimeout(requestSeconds *int) time.Duration {
+	if requestSeconds != nil {
+		if *requestSeconds < 0 {
+			return 0 // sentinel: no timeout
+		}
+		if *requestSeconds > 0 {
+			return time.Duration(*requestSeconds) * time.Second
+		}
+	}
+	return s.streamTimeout
 }
