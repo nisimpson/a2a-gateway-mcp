@@ -20,7 +20,7 @@ func (s *Server) registerToolsV2() {
 		HistoryBackend:         s.historyBackendAdapter(),
 		A2AClientResolver:      s.clients,
 		CallerCardInjector:     s.callerCardInjectorAdapter(),
-		CallerCardStore:        s.callerCardStoreAdapter(),
+		CallerCardStore:        &callerCardStore{server: s},
 		ContextStore:           s.contextStore,
 		HistoryRecorder:        s.historyRecorderAdapter(),
 		AgentCardFetcher:       s.agentCardFetcherAdapter(),
@@ -119,58 +119,6 @@ type callerCardInjectorAdapter struct {
 
 func (a *callerCardInjectorAdapter) InjectCallerCard(metadata map[string]any) map[string]any {
 	return a.server.injectCallerCard(metadata)
-}
-
-// --- CallerCardStore adapter ---
-
-func (s *Server) callerCardStoreAdapter() *callerCardStoreAdapter {
-	return &callerCardStoreAdapter{server: s}
-}
-
-type callerCardStoreAdapter struct {
-	server *Server
-}
-
-func (a *callerCardStoreAdapter) Set(card *tool.CallerCard, metadataKey string) {
-	a.server.callerCardMu.Lock()
-	defer a.server.callerCardMu.Unlock()
-
-	a.server.callerCard = &CallerCard{
-		Name:        card.Name,
-		Description: card.Description,
-		URL:         card.URL,
-	}
-	if metadataKey != "" {
-		a.server.callerCardKey = metadataKey
-	} else {
-		a.server.callerCardKey = defaultCallerCardKey
-	}
-}
-
-func (a *callerCardStoreAdapter) Get() *tool.CallerCard {
-	a.server.callerCardMu.RLock()
-	defer a.server.callerCardMu.RUnlock()
-
-	if a.server.callerCard == nil {
-		return nil
-	}
-	return &tool.CallerCard{
-		Name:        a.server.callerCard.Name,
-		Description: a.server.callerCard.Description,
-		URL:         a.server.callerCard.URL,
-	}
-}
-
-func (a *callerCardStoreAdapter) Remove() bool {
-	a.server.callerCardMu.Lock()
-	defer a.server.callerCardMu.Unlock()
-
-	if a.server.callerCard == nil {
-		return false
-	}
-	a.server.callerCard = nil
-	a.server.callerCardKey = ""
-	return true
 }
 
 // --- HistoryBackend adapter ---

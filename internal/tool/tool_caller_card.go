@@ -8,28 +8,18 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 // CallerSkill represents a skill on the caller agent card.
-type CallerSkill struct {
-	Name        string `json:"name" jsonschema:"skill name (required)"`
-	Description string `json:"description,omitempty" jsonschema:"strongly recommended — provide one even if you need to infer it from the skill name"`
-}
+// CallerSkill is an alias for registry.CallerSkill.
+type CallerSkill = registry.CallerSkill
 
-// CallerCapabilities describes supported A2A capabilities.
-type CallerCapabilities struct {
-	Streaming         bool `json:"streaming,omitempty" jsonschema:"whether the caller supports streaming"`
-	PushNotifications bool `json:"pushNotifications,omitempty" jsonschema:"whether the caller supports push notifications"`
-}
+// CallerCapabilities is an alias for registry.CallerCapabilities.
+type CallerCapabilities = registry.CallerCapabilities
 
-// CallerCard is the stored representation of the caller agent card.
-type CallerCard struct {
-	Name         string              `json:"name"`
-	Description  string              `json:"description"`
-	URL          string              `json:"url,omitempty"`
-	Skills       []CallerSkill       `json:"skills,omitempty"`
-	Capabilities *CallerCapabilities `json:"capabilities,omitempty"`
-}
+// CallerCard is an alias for registry.CallerCard.
+type CallerCard = registry.CallerCard
 
 // --- CreateCallerCardTool ---
 

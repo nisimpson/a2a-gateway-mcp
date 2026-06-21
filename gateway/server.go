@@ -160,7 +160,7 @@ type Server struct {
 	defaultRateLimit *RateLimitConfig // nil means no global default (unlimited)
 
 	// Requirement: CAC-1.9 — global caller card state
-	callerCard    *CallerCard // nil when no card is registered
+	callerCard    *registry.CallerCard // nil when no card is registered
 	callerCardKey string      // metadata key; empty means use default
 	callerCardMu  sync.RWMutex
 
