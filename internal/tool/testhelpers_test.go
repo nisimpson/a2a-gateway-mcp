@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -243,6 +244,19 @@ func jsonrpcMessageResult(msg *a2a.Message) map[string]any {
 	return map[string]any{"kind": "message", "message": msg}
 }
 
+// --- Mock HTTPDoer ---
+
+type mockHTTPDoer struct {
+	DoFn func(req *http.Request) (*http.Response, error)
+}
+
+func (m *mockHTTPDoer) Do(req *http.Request) (*http.Response, error) {
+	if m.DoFn != nil {
+		return m.DoFn(req)
+	}
+	return nil, fmt.Errorf("not implemented")
+}
+
 // newTestClient creates a real a2aclient.Client pointing at the given URL
 // using JSON-RPC transport (for httptest servers).
 func newTestClient(ctx context.Context, url string) (*a2aclient.Client, error) {
@@ -250,4 +264,81 @@ func newTestClient(ctx context.Context, url string) (*a2aclient.Client, error) {
 		a2a.NewAgentInterface(url, a2a.TransportProtocolJSONRPC),
 	}
 	return a2aclient.NewFromEndpoints(ctx, endpoints)
+}
+
+// --- Mock AgentCardFetcher ---
+
+type mockCardFetcher struct {
+	FetchAgentCardFn func(ctx context.Context, agentURL string, headers map[string]string) *a2a.AgentCard
+}
+
+func (m *mockCardFetcher) FetchAgentCard(ctx context.Context, agentURL string, headers map[string]string) *a2a.AgentCard {
+	if m.FetchAgentCardFn != nil {
+		return m.FetchAgentCardFn(ctx, agentURL, headers)
+	}
+	return nil
+}
+
+// --- Mock HistoryBackend ---
+
+type mockHistoryBackend struct {
+	ListFn   func(ctx context.Context, alias string) ([]history.Entry, error)
+	ClearFn  func(ctx context.Context, alias string) error
+	DeleteFn func(ctx context.Context, alias string) error
+}
+
+func (m *mockHistoryBackend) List(ctx context.Context, alias string) ([]history.Entry, error) {
+	if m.ListFn != nil {
+		return m.ListFn(ctx, alias)
+	}
+	return nil, nil
+}
+
+func (m *mockHistoryBackend) Clear(ctx context.Context, alias string) error {
+	if m.ClearFn != nil {
+		return m.ClearFn(ctx, alias)
+	}
+	return nil
+}
+
+func (m *mockHistoryBackend) Delete(ctx context.Context, alias string) error {
+	if m.DeleteFn != nil {
+		return m.DeleteFn(ctx, alias)
+	}
+	return nil
+}
+
+// --- Mock PingStrategy ---
+
+type mockPingStrategy struct {
+	PingFn func(ctx context.Context, target PingTarget) PingResult
+}
+
+func (m *mockPingStrategy) Ping(ctx context.Context, target PingTarget) PingResult {
+	if m.PingFn != nil {
+		return m.PingFn(ctx, target)
+	}
+	return PingResult{}
+}
+
+// --- Mock CallerCardStore ---
+
+type mockCallerCardStore struct {
+	card        *CallerCard
+	metadataKey string
+}
+
+func (m *mockCallerCardStore) Set(card *CallerCard, metadataKey string) {
+	m.card = card
+	m.metadataKey = metadataKey
+}
+
+func (m *mockCallerCardStore) Get() *CallerCard {
+	return m.card
+}
+
+func (m *mockCallerCardStore) Remove() bool {
+	had := m.card != nil
+	m.card = nil
+	return had
 }
