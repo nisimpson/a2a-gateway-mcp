@@ -11,7 +11,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/nisimpson/a2a-gateway-mcp/internal/health"
+	"github.com/nisimpson/a2a-gateway-mcp/health"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/history"
 )
 

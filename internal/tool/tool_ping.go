@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/nisimpson/a2a-gateway-mcp/internal/health"
+	"github.com/nisimpson/a2a-gateway-mcp/health"
 )
 
 // PingAgentInput is the input schema for the ping_agent tool.
