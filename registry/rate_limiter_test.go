@@ -1,4 +1,4 @@
-package gateway
+package registry
 
 import (
 	"fmt"
@@ -12,7 +12,6 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Feature: rate-limiting, Property 1: Rate limiter count invariant
@@ -126,61 +125,30 @@ func TestPropertyRateLimitErrorMessage(t *testing.T) {
 	// Generator for burst capacities (1-10)
 	burstGen := gen.IntRange(1, 10)
 
-	properties.Property("checkRateLimit error message contains alias and parseable wait duration", prop.ForAll(
+	properties.Property("CheckRateLimit error message contains alias and parseable wait duration", prop.ForAll(
 		func(alias string, burst int) bool {
-			s := &Server{
-				rateLimiters: NewRateLimiterRegistry(),
-			}
+			rl := NewRateLimiterRegistry()
 
 			// Set a limiter with extremely low RPS so no tokens refill during the test.
-			s.rateLimiters.Set(alias, 1e-9, burst)
+			rl.Set(alias, 1e-9, burst)
 
 			// Exhaust all tokens by calling Allow() burst times.
 			for i := 0; i < burst; i++ {
-				s.rateLimiters.Allow(alias)
+				rl.Allow(alias)
 			}
 
-			// Now call checkRateLimit — should return a non-nil error result.
-			result := s.checkRateLimit(alias)
-			if result == nil {
-				t.Logf("checkRateLimit returned nil for alias %q after exhausting %d tokens", alias, burst)
+			// Now call CheckRateLimit — should return a non-nil error.
+			err := rl.CheckRateLimit(alias)
+			if err == nil {
+				t.Logf("CheckRateLimit returned nil for alias %q after exhausting %d tokens", alias, burst)
 				return false
 			}
 
-			// Verify IsError is true.
-			if !result.IsError {
-				t.Logf("expected IsError=true, got false for alias %q", alias)
-				return false
-			}
-
-			// Extract the text content from the result.
-			if len(result.Content) == 0 {
-				t.Logf("expected non-empty content for alias %q", alias)
-				return false
-			}
-
-			var msg string
-			for _, c := range result.Content {
-				if tc, ok := c.(*mcp.TextContent); ok {
-					msg = tc.Text
-					break
-				}
-			}
-
-			if msg == "" {
-				t.Logf("no text content found in result for alias %q", alias)
-				return false
-			}
+			msg := err.Error()
 
 			// Verify the error message contains the alias string.
 			if !strings.Contains(msg, alias) {
 				t.Logf("message %q does not contain alias %q", msg, alias)
-				return false
-			}
-
-			// Verify the error message contains "rate limited".
-			if !strings.Contains(msg, "rate limited") {
-				t.Logf("message %q does not contain 'rate limited'", msg)
 				return false
 			}
 
@@ -190,18 +158,16 @@ func TestPropertyRateLimitErrorMessage(t *testing.T) {
 				return false
 			}
 
-			// Verify the duration portion is parseable (contains a time-like string).
-			// The format is "retry after <duration>" where duration is from Go's
-			// time.Duration.String() e.g. "1ms", "2s", "1h30m".
+			// Verify the duration portion is parseable.
 			parts := strings.SplitAfter(msg, "retry after ")
 			if len(parts) < 2 {
 				t.Logf("could not find duration after 'retry after' in message %q", msg)
 				return false
 			}
 			durationStr := parts[len(parts)-1]
-			_, err := time.ParseDuration(durationStr)
-			if err != nil {
-				t.Logf("duration %q is not parseable: %v", durationStr, err)
+			_, parseErr := time.ParseDuration(durationStr)
+			if parseErr != nil {
+				t.Logf("duration %q is not parseable: %v", durationStr, parseErr)
 				return false
 			}
 
@@ -552,12 +518,6 @@ func TestPropertyDirectURLBypassesRateLimit(t *testing.T) {
 					t.Logf("Allow() returned false on call %d for alias without limiter", i+1)
 					return false
 				}
-			}
-
-			// Also verify Reserve() returns nil (no limiter).
-			if reservation := registry.Reserve("direct-url-agent"); reservation != nil {
-				t.Log("Reserve() should return nil for alias without limiter")
-				return false
 			}
 
 			return true

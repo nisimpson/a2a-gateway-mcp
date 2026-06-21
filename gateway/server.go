@@ -155,8 +155,8 @@ type Server struct {
 	streamTimeout time.Duration
 
 	// Rate limiting — Requirement: RLIM-3.1
-	rateLimiters     *RateLimiterRegistry
-	defaultRateLimit *RateLimitConfig // nil means no global default (unlimited)
+	rateLimiters     *registry.RateLimiterRegistry
+	defaultRateLimit *registry.RateLimitConfig // nil means no global default (unlimited)
 
 	// Requirement: CAC-1.9 — global caller card state
 	callerCardStore *registry.CallerCardStore
@@ -199,12 +199,12 @@ func NewServer(opts ...Option) *Server {
 		httpClient:    cfg.httpClient,
 		pollTimeout:   cfg.pollTimeout,
 		streamTimeout: cfg.streamTimeout,
-		rateLimiters:  NewRateLimiterRegistry(),
+		rateLimiters:  registry.NewRateLimiterRegistry(),
 	}
 
 	// Set global default rate limit if both RPS and burst are positive.
 	if cfg.rateLimitRPS > 0 && cfg.rateLimitBurst > 0 {
-		s.defaultRateLimit = &RateLimitConfig{
+		s.defaultRateLimit = &registry.RateLimitConfig{
 			RequestsPerSecond: cfg.rateLimitRPS,
 			Burst:             cfg.rateLimitBurst,
 		}

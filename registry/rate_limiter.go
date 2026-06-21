@@ -1,11 +1,10 @@
-package gateway
+package registry
 
 import (
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/time/rate"
 )
 
@@ -71,20 +70,6 @@ func (r *RateLimiterRegistry) Allow(alias string) bool {
 	return limiter.Allow()
 }
 
-// Reserve returns a reservation for a token from the alias's rate limiter.
-// If no limiter exists for the alias, returns nil (no limit).
-func (r *RateLimiterRegistry) Reserve(alias string) *rate.Reservation {
-	r.mu.RLock()
-	limiter, exists := r.limiters[alias]
-	r.mu.RUnlock()
-
-	if !exists {
-		return nil
-	}
-
-	return limiter.Reserve()
-}
-
 // Get returns the rate limit config for an alias for observability.
 // Returns the configured rps, burst, and whether a limiter exists.
 func (r *RateLimiterRegistry) Get(alias string) (rps float64, burst int, exists bool) {
@@ -121,29 +106,9 @@ func (r *RateLimiterRegistry) CheckRateLimit(alias string) error {
 
 	reservation := limiter.Reserve()
 	if reservation.Delay() == 0 {
-		return nil // token available
+		return nil
 	}
 	reservation.Cancel()
 	waitTime := reservation.Delay().Round(time.Millisecond)
 	return fmt.Errorf("agent %q has exceeded its rate limit; retry after %s", alias, waitTime)
-}
-
-// checkRateLimit checks the rate limiter for an alias and returns an error
-// result if the request is rate limited, or nil if allowed.
-func (s *Server) checkRateLimit(alias string) *mcp.CallToolResult {
-	reservation := s.rateLimiters.Reserve(alias)
-	if reservation == nil {
-		return nil // no limiter = unlimited
-	}
-	if reservation.Delay() == 0 {
-		return nil // token available, consumed
-	}
-	// Rate limited — cancel reservation and return error with wait time.
-	reservation.Cancel()
-	waitTime := reservation.Delay().Round(time.Millisecond)
-	msg := fmt.Sprintf("rate limited: agent %q has exceeded its rate limit; retry after %s", alias, waitTime)
-	return &mcp.CallToolResult{
-		IsError: true,
-		Content: []mcp.Content{&mcp.TextContent{Text: msg}},
-	}
 }

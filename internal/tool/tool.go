@@ -67,16 +67,8 @@ func RegisterAll(srv *mcp.Server, env *Env) {
 // per-request timeout override in seconds.
 type EffectiveTimeoutFunc = func(requestSeconds *int) time.Duration
 
-// RateLimitConfig holds rate limit parameters.
-type RateLimitConfig struct {
-	RequestsPerSecond float64
-	Burst             int
-}
-
-// IsDisabled returns true if the rate limit is effectively disabled (zero values).
-func (c *RateLimitConfig) IsDisabled() bool {
-	return c.RequestsPerSecond <= 0 || c.Burst <= 0
-}
+// RateLimitConfig is an alias for registry.RateLimitConfig.
+type RateLimitConfig = registry.RateLimitConfig
 
 // --- Consolidated interfaces ---
 
