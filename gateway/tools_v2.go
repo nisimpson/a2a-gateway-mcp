@@ -6,7 +6,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
-	"github.com/nisimpson/a2a-gateway-mcp/internal/history"
+	"github.com/nisimpson/a2a-gateway-mcp/history"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/tool"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/validate"
@@ -248,59 +248,23 @@ func (a *callerCardStoreAdapter) Remove() bool {
 }
 
 // --- HistoryBackend adapter ---
-// Wraps gateway.HistoryBackend to satisfy tool.HistoryBackend (uses history.Entry).
+// history.Backend satisfies tool.HistoryBackend directly (List, Clear, Delete).
 
 func (s *Server) historyBackendAdapter() tool.HistoryBackend {
 	if s.historyBackend == nil {
 		return nil
 	}
-	return &historyBackendAdapter{backend: s.historyBackend}
-}
-
-type historyBackendAdapter struct {
-	backend HistoryBackend
-}
-
-func (a *historyBackendAdapter) List(ctx context.Context, alias string) ([]history.Entry, error) {
-	entries, err := a.backend.List(ctx, alias)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]history.Entry, len(entries))
-	for i, e := range entries {
-		out[i] = history.Entry{
-			Timestamp:   e.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
-			SentMessage: e.SentMsg,
-			Response:    e.Response,
-			ContextID:   e.ContextID,
-			TaskID:      e.TaskID,
-			IsError:     e.IsError,
-		}
-	}
-	return out, nil
-}
-
-func (a *historyBackendAdapter) Clear(ctx context.Context, alias string) error {
-	return a.backend.Clear(ctx, alias)
-}
-
-func (a *historyBackendAdapter) Delete(ctx context.Context, alias string) error {
-	return a.backend.Delete(ctx, alias)
+	return s.historyBackend
 }
 
 // --- HistoryRecorder adapter ---
-// Wraps gateway.HistoryBackend into a history.Recorder that satisfies tool.HistoryRecorder.
 
-func (s *Server) historyRecorderAdapter() *historyRecorderAdapter {
-	return &historyRecorderAdapter{server: s}
-}
-
-type historyRecorderAdapter struct {
-	server *Server
-}
-
-func (a *historyRecorderAdapter) Record(ctx context.Context, input history.RecordInput) {
-	a.server.recordHistory(ctx, input.Alias, input.Sent, input.Response, input.ContextID, input.TaskID, input.IsError)
+func (s *Server) historyRecorderAdapter() *history.Recorder {
+	return &history.Recorder{
+		Backend:        s.historyBackend,
+		Enabled:        s.historyEnabled,
+		MaxEntryLength: s.maxEntryLength,
+	}
 }
 
 // --- AgentCardFetcher adapter ---

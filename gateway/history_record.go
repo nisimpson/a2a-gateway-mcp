@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"time"
+
+	"github.com/nisimpson/a2a-gateway-mcp/history"
 )
 
 // truncateText truncates text to maxLen runes, appending "…" if truncated.
@@ -29,13 +31,13 @@ func (s *Server) recordHistory(ctx context.Context, alias, sent, response, conte
 		return
 	}
 
-	entry := HistoryEntry{
-		Timestamp: time.Now().UTC(),
-		SentMsg:   truncateText(sent, s.maxEntryLength),
-		Response:  truncateText(response, s.maxEntryLength),
-		ContextID: contextID,
-		TaskID:    taskID,
-		IsError:   isError,
+	entry := history.Entry{
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		SentMessage: truncateText(sent, s.maxEntryLength),
+		Response:    truncateText(response, s.maxEntryLength),
+		ContextID:   contextID,
+		TaskID:      taskID,
+		IsError:     isError,
 	}
 
 	if err := s.historyBackend.Append(ctx, alias, entry); err != nil {

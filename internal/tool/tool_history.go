@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/nisimpson/a2a-gateway-mcp/internal/history"
+	"github.com/nisimpson/a2a-gateway-mcp/history"
 )
 
 // GetHistoryInput is the input schema for the get_history tool.

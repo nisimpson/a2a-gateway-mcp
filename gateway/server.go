@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nisimpson/a2a-gateway-mcp/health"
+	"github.com/nisimpson/a2a-gateway-mcp/history"
 )
 
 const (
@@ -43,7 +44,7 @@ type HistoryOptions struct {
 
 	// Backend is the storage implementation (default: in-memory).
 	// Must be safe for concurrent use.
-	Backend HistoryBackend
+	Backend history.Backend
 }
 
 // Option configures the Gateway server at initialization time.
@@ -68,7 +69,7 @@ type serverConfig struct {
 	historyConfigured bool // true when WithHistory was called
 	historyDepth      int
 	historyMaxEntry   int
-	historyBackend    HistoryBackend
+	historyBackend    history.Backend
 }
 
 // WithHTTPClient sets a custom http.Client for all outbound A2A requests.
@@ -163,7 +164,7 @@ type Server struct {
 	callerCardMu  sync.RWMutex
 
 	// History subsystem — Requirements: 1.3, 6.3
-	historyBackend HistoryBackend
+	historyBackend history.Backend
 	historyEnabled bool
 	historyDepth   int
 	maxEntryLength int
@@ -227,7 +228,7 @@ func NewServer(opts ...Option) *Server {
 			}
 			backend := cfg.historyBackend
 			if backend == nil {
-				backend = NewMemoryBackend(depth)
+				backend = history.NewMemoryBackend(depth)
 			}
 			s.historyEnabled = true
 			s.historyDepth = depth
@@ -239,7 +240,7 @@ func NewServer(opts ...Option) *Server {
 		s.historyEnabled = true
 		s.historyDepth = 50
 		s.maxEntryLength = 1000
-		s.historyBackend = NewMemoryBackend(50)
+		s.historyBackend = history.NewMemoryBackend(50)
 	}
 
 	s.clients = newClientResolver(s.registry, s.httpClient)

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nisimpson/a2a-gateway-mcp/internal/history"
+	"github.com/nisimpson/a2a-gateway-mcp/history"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
 )
 
