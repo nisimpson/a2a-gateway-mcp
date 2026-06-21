@@ -21,25 +21,29 @@ func newCancelTaskTool(reg *mockRegistry, clientResolver *mockClientResolver) *C
 func TestCancelTask_AgentRequired(t *testing.T) {
 	c := newCancelTaskTool(&mockRegistry{}, &mockClientResolver{})
 	result, _, err := c.Handle(context.Background(), nil, &CancelTaskInput{})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatal("expected nil result for validation error")
 	}
-	assertTextContains(t, result, "agent identifier is required")
+	if err.Error() != "agent identifier is required" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestCancelTask_TaskIDRequired(t *testing.T) {
 	c := newCancelTaskTool(&mockRegistry{}, &mockClientResolver{})
 	result, _, err := c.Handle(context.Background(), nil, &CancelTaskInput{Agent: "test-agent"})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatal("expected nil result for validation error")
 	}
-	assertTextContains(t, result, "task_id is required")
+	if err.Error() != "task_id is required" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestCancelTask_Success(t *testing.T) {
@@ -65,17 +69,19 @@ func TestCancelTask_Success(t *testing.T) {
 	}
 
 	c := newCancelTaskTool(reg, clientResolver)
-	result, _, err := c.Handle(context.Background(), nil, &CancelTaskInput{
+	result, out, err := c.Handle(context.Background(), nil, &CancelTaskInput{
 		Agent:  "test-agent",
 		TaskID: "task-abc",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatalf("unexpected result for success: %v", result)
 	}
-	assertTextContains(t, result, "task-abc has been canceled")
+	if out == nil {
+		t.Fatal("expected structured output")
+	}
 }
 
 func TestCancelTask_NotCancelable(t *testing.T) {

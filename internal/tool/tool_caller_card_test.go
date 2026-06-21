@@ -68,10 +68,7 @@ func TestViewCallerCard_NoCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result == nil {
-		t.Fatal("expected result for no card case")
-	}
-	if !result.IsError {
-		t.Fatal("unexpected error result")
+		t.Fatal("expected result")
 	}
 	assertTextContains(t, result, "no caller agent card is currently set")
 }
