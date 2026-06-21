@@ -107,6 +107,27 @@ func (r *RateLimiterRegistry) Len() int {
 	return len(r.limiters)
 }
 
+// CheckRateLimit checks the rate limiter for an alias and returns a non-nil
+// error if the request is rate limited. Returns nil if allowed or no limiter
+// exists for the alias.
+func (r *RateLimiterRegistry) CheckRateLimit(alias string) error {
+	r.mu.RLock()
+	limiter, exists := r.limiters[alias]
+	r.mu.RUnlock()
+
+	if !exists {
+		return nil
+	}
+
+	reservation := limiter.Reserve()
+	if reservation.Delay() == 0 {
+		return nil // token available
+	}
+	reservation.Cancel()
+	waitTime := reservation.Delay().Round(time.Millisecond)
+	return fmt.Errorf("agent %q has exceeded its rate limit; retry after %s", alias, waitTime)
+}
+
 // checkRateLimit checks the rate limiter for an alias and returns an error
 // result if the request is rate limited, or nil if allowed.
 func (s *Server) checkRateLimit(alias string) *mcp.CallToolResult {

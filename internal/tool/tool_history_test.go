@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nisimpson/a2a-gateway-mcp/internal/history"
+	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
 )
 
 func newGetHistoryTool() (*GetHistoryTool, *mockRegistry, *mockHistoryBackend) {
@@ -41,7 +42,7 @@ func TestGetHistory_EmptyAlias(t *testing.T) {
 
 func TestGetHistory_AgentNotFound(t *testing.T) {
 	tool, reg, _ := newGetHistoryTool()
-	reg.LookupFn = func(alias string) *AgentEntry { return nil }
+	reg.LookupFn = func(alias string) *registry.RegisteredAgent { return nil }
 
 	result, output, err := tool.Handle(context.Background(), nil, &GetHistoryInput{Agent: "ghost"})
 	if err == nil {
@@ -55,8 +56,8 @@ func TestGetHistory_AgentNotFound(t *testing.T) {
 func TestGetHistory_Success(t *testing.T) {
 	tool, reg, hb := newGetHistoryTool()
 
-	reg.LookupFn = func(alias string) *AgentEntry {
-		return &AgentEntry{Alias: "my-agent", URL: "http://example.com"}
+	reg.LookupFn = func(alias string) *registry.RegisteredAgent {
+		return &registry.RegisteredAgent{Alias: "my-agent", URL: "http://example.com"}
 	}
 
 	now := time.Now()
@@ -88,8 +89,8 @@ func TestGetHistory_Success(t *testing.T) {
 func TestGetHistory_WithLimit(t *testing.T) {
 	tool, reg, hb := newGetHistoryTool()
 
-	reg.LookupFn = func(alias string) *AgentEntry {
-		return &AgentEntry{Alias: "my-agent", URL: "http://example.com"}
+	reg.LookupFn = func(alias string) *registry.RegisteredAgent {
+		return &registry.RegisteredAgent{Alias: "my-agent", URL: "http://example.com"}
 	}
 
 	now := time.Now()
@@ -127,8 +128,8 @@ func TestGetHistory_WithLimit(t *testing.T) {
 func TestClearHistory_Success(t *testing.T) {
 	tool, reg, hb := newClearHistoryTool()
 
-	reg.LookupFn = func(alias string) *AgentEntry {
-		return &AgentEntry{Alias: "my-agent", URL: "http://example.com"}
+	reg.LookupFn = func(alias string) *registry.RegisteredAgent {
+		return &registry.RegisteredAgent{Alias: "my-agent", URL: "http://example.com"}
 	}
 
 	var clearCalled bool
@@ -154,7 +155,7 @@ func TestClearHistory_Success(t *testing.T) {
 
 func TestClearHistory_AgentNotFound(t *testing.T) {
 	tool, reg, _ := newClearHistoryTool()
-	reg.LookupFn = func(alias string) *AgentEntry { return nil }
+	reg.LookupFn = func(alias string) *registry.RegisteredAgent { return nil }
 
 	result, output, err := tool.Handle(context.Background(), nil, &ClearHistoryInput{Agent: "ghost"})
 	if err == nil {

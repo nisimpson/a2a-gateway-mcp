@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
 )
 
 func newPingTool() (*PingAgentTool, *mockRegistry, *mockHealthTracker, *mockPingStrategy) {
@@ -35,7 +37,7 @@ func TestPing_EmptyAlias(t *testing.T) {
 
 func TestPing_AgentNotFound(t *testing.T) {
 	tool, reg, _, _ := newPingTool()
-	reg.LookupFn = func(alias string) *AgentEntry { return nil }
+	reg.LookupFn = func(alias string) *registry.RegisteredAgent { return nil }
 
 	result, output, err := tool.Handle(context.Background(), nil, &PingAgentInput{Alias: "ghost"})
 	if err == nil {
@@ -49,8 +51,8 @@ func TestPing_AgentNotFound(t *testing.T) {
 func TestPing_Reachable(t *testing.T) {
 	tool, reg, ht, ps := newPingTool()
 
-	reg.LookupFn = func(alias string) *AgentEntry {
-		return &AgentEntry{Alias: "my-agent", URL: "http://example.com"}
+	reg.LookupFn = func(alias string) *registry.RegisteredAgent {
+		return &registry.RegisteredAgent{Alias: "my-agent", URL: "http://example.com"}
 	}
 
 	ps.PingFn = func(_ context.Context, target PingTarget) PingResult {
@@ -86,8 +88,8 @@ func TestPing_Reachable(t *testing.T) {
 func TestPing_Unreachable(t *testing.T) {
 	tool, reg, ht, ps := newPingTool()
 
-	reg.LookupFn = func(alias string) *AgentEntry {
-		return &AgentEntry{Alias: "my-agent", URL: "http://example.com"}
+	reg.LookupFn = func(alias string) *registry.RegisteredAgent {
+		return &registry.RegisteredAgent{Alias: "my-agent", URL: "http://example.com"}
 	}
 
 	ps.PingFn = func(_ context.Context, target PingTarget) PingResult {

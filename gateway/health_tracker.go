@@ -122,3 +122,21 @@ func (h *HealthTracker) Delete(alias string) {
 func (h *HealthTracker) IsEnabled() bool {
 	return h.threshold > 0
 }
+
+// IsHealthy reports whether the specified alias is currently healthy.
+// Returns true if the agent is not unhealthy (healthy, unknown, or untracked).
+func (h *HealthTracker) IsHealthy(alias string) bool {
+	state := h.Get(alias)
+	return state.Status != HealthStatusUnhealthy
+}
+
+// GetStatus returns the health status string for the alias.
+func (h *HealthTracker) GetStatus(alias string) string {
+	return string(h.Get(alias).Status)
+}
+
+// GetFailures returns the consecutive failure count and whether the agent is unhealthy.
+func (h *HealthTracker) GetFailures(alias string) (int, bool) {
+	state := h.Get(alias)
+	return state.Failures, state.Status == HealthStatusUnhealthy
+}

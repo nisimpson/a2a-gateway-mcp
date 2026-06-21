@@ -10,27 +10,28 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/history"
+	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
 )
 
 // --- Mock AgentRegistry ---
 
 type mockRegistry struct {
-	LookupFn            func(alias string) *AgentEntry
-	ListFn              func() []*AgentEntry
+	LookupFn            func(alias string) *registry.RegisteredAgent
+	ListFn              func() []*registry.RegisteredAgent
 	ConnectFn           func(alias, url string, headers map[string]string, pingEndpoint string) bool
-	DisconnectFn        func(alias string) *AgentEntry
+	DisconnectFn        func(alias string) *registry.RegisteredAgent
 	SetCardFn           func(alias string, card *a2a.AgentCard) bool
 	ResolveAgentFn      func(identifier string) (*ResolveResult, error)
 	SupportsStreamingFn func(resolved *ResolveResult) bool
 }
 
-func (m *mockRegistry) Lookup(alias string) *AgentEntry {
+func (m *mockRegistry) Lookup(alias string) *registry.RegisteredAgent {
 	if m.LookupFn != nil {
 		return m.LookupFn(alias)
 	}
 	return nil
 }
-func (m *mockRegistry) List() []*AgentEntry {
+func (m *mockRegistry) List() []*registry.RegisteredAgent {
 	if m.ListFn != nil {
 		return m.ListFn()
 	}
@@ -42,7 +43,7 @@ func (m *mockRegistry) Connect(alias, url string, headers map[string]string, pin
 	}
 	return false
 }
-func (m *mockRegistry) Disconnect(alias string) *AgentEntry {
+func (m *mockRegistry) Disconnect(alias string) *registry.RegisteredAgent {
 	if m.DisconnectFn != nil {
 		return m.DisconnectFn(alias)
 	}

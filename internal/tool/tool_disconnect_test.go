@@ -3,6 +3,8 @@ package tool
 import (
 	"context"
 	"testing"
+
+	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
 )
 
 func newDisconnectTool() (*DisconnectAgentTool, *mockRegistry, *mockClientResolver, *mockRateLimiter, *mockHealthTracker, *mockContextStore) {
@@ -38,7 +40,7 @@ func TestDisconnect_InvalidAlias(t *testing.T) {
 
 func TestDisconnect_NotFound(t *testing.T) {
 	tool, reg, _, _, _, _ := newDisconnectTool()
-	reg.DisconnectFn = func(alias string) *AgentEntry {
+	reg.DisconnectFn = func(alias string) *registry.RegisteredAgent {
 		return nil
 	}
 	result, output, err := tool.Handle(context.Background(), nil, &DisconnectAgentInput{Alias: "ghost"})
@@ -56,8 +58,8 @@ func TestDisconnect_NotFound(t *testing.T) {
 func TestDisconnect_Success(t *testing.T) {
 	tool, reg, resolver, rl, ht, cs := newDisconnectTool()
 
-	reg.DisconnectFn = func(alias string) *AgentEntry {
-		return &AgentEntry{Alias: "my-agent", URL: "http://example.com"}
+	reg.DisconnectFn = func(alias string) *registry.RegisteredAgent {
+		return &registry.RegisteredAgent{Alias: "my-agent", URL: "http://example.com"}
 	}
 
 	var evictCalled bool
@@ -117,8 +119,8 @@ func TestDisconnect_Success(t *testing.T) {
 func TestDisconnect_NoHistory(t *testing.T) {
 	tool, reg, _, _, _, _ := newDisconnectTool()
 
-	reg.DisconnectFn = func(alias string) *AgentEntry {
-		return &AgentEntry{Alias: "my-agent", URL: "http://example.com"}
+	reg.DisconnectFn = func(alias string) *registry.RegisteredAgent {
+		return &registry.RegisteredAgent{Alias: "my-agent", URL: "http://example.com"}
 	}
 
 	// HistoryBackend is nil — should not panic.

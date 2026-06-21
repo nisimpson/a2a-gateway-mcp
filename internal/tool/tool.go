@@ -9,6 +9,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/history"
+	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
 )
 
 type Env struct {
@@ -65,14 +66,6 @@ func RegisterAll(srv *mcp.Server, env *Env) {
 // per-request timeout override in seconds.
 type EffectiveTimeoutFunc = func(requestSeconds *int) time.Duration
 
-// AgentEntry holds connection info for a registered agent.
-type AgentEntry struct {
-	Alias        string
-	URL          string
-	Headers      map[string]string
-	PingEndpoint string
-}
-
 // ResolveResult contains the resolved agent information.
 type ResolveResult struct {
 	URL     string
@@ -98,13 +91,13 @@ func (c *RateLimitConfig) IsDisabled() bool {
 type AgentRegistry interface {
 	// Lookup retrieves the agent entry associated with the given alias.
 	// Returns nil if no agent is registered under that alias.
-	Lookup(alias string) *AgentEntry
+	Lookup(alias string) *registry.RegisteredAgent
 	// List returns all registered agent entries.
-	List() []*AgentEntry
+	List() []*registry.RegisteredAgent
 	// Connect registers or updates an agent in the registry.
 	Connect(alias, url string, headers map[string]string, pingEndpoint string) (updated bool)
 	// Disconnect removes the agent entry and returns it, or nil if not found.
-	Disconnect(alias string) *AgentEntry
+	Disconnect(alias string) *registry.RegisteredAgent
 	// SetCard stores an agent card for the given alias.
 	SetCard(alias string, card *a2a.AgentCard) bool
 	// ResolveAgent resolves the given identifier to connection details for

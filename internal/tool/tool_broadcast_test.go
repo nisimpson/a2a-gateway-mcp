@@ -9,6 +9,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
 )
 
 func newBroadcastTool(reg *mockRegistry, clientResolver *mockClientResolver) *BroadcastMessageTool {
@@ -116,8 +117,8 @@ func TestBroadcast_SingleAgent_Success(t *testing.T) {
 	defer agent.Close()
 
 	reg := &mockRegistry{
-		LookupFn: func(alias string) *AgentEntry {
-			return &AgentEntry{Alias: alias, URL: agent.URL}
+		LookupFn: func(alias string) *registry.RegisteredAgent {
+			return &registry.RegisteredAgent{Alias: alias, URL: agent.URL}
 		},
 	}
 
@@ -155,8 +156,8 @@ func TestBroadcast_SingleAgent_Success(t *testing.T) {
 
 func TestBroadcast_UnhealthySkipped(t *testing.T) {
 	reg := &mockRegistry{
-		LookupFn: func(alias string) *AgentEntry {
-			return &AgentEntry{Alias: alias, URL: "http://example.com"}
+		LookupFn: func(alias string) *registry.RegisteredAgent {
+			return &registry.RegisteredAgent{Alias: alias, URL: "http://example.com"}
 		},
 	}
 
@@ -191,8 +192,8 @@ func TestBroadcast_UnhealthySkipped(t *testing.T) {
 
 func TestBroadcast_RateLimited(t *testing.T) {
 	reg := &mockRegistry{
-		LookupFn: func(alias string) *AgentEntry {
-			return &AgentEntry{Alias: alias, URL: "http://example.com"}
+		LookupFn: func(alias string) *registry.RegisteredAgent {
+			return &registry.RegisteredAgent{Alias: alias, URL: "http://example.com"}
 		},
 	}
 
@@ -226,7 +227,7 @@ func TestBroadcast_RateLimited(t *testing.T) {
 
 func TestBroadcast_AgentNotFound(t *testing.T) {
 	reg := &mockRegistry{
-		LookupFn: func(alias string) *AgentEntry { return nil },
+		LookupFn: func(alias string) *registry.RegisteredAgent { return nil },
 	}
 
 	b := newBroadcastTool(reg, &mockClientResolver{})

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
 )
 
 func newConnectTool() (*ConnectAgentTool, *mockRegistry, *mockClientResolver, *mockRateLimiter, *mockHealthTracker, *mockCardFetcher) {
@@ -113,8 +114,8 @@ func TestConnect_ReplacesExisting(t *testing.T) {
 	tool, reg, resolver, _, _, _ := newConnectTool()
 
 	// Existing agent at a different URL.
-	reg.LookupFn = func(alias string) *AgentEntry {
-		return &AgentEntry{Alias: "my-agent", URL: "http://old.com"}
+	reg.LookupFn = func(alias string) *registry.RegisteredAgent {
+		return &registry.RegisteredAgent{Alias: "my-agent", URL: "http://old.com"}
 	}
 
 	var evictCalled bool

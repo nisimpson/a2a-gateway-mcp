@@ -3,6 +3,8 @@ package tool
 import (
 	"context"
 	"testing"
+
+	"github.com/nisimpson/a2a-gateway-mcp/internal/registry"
 )
 
 func newListTool() (*ListAgentsTool, *mockRegistry, *mockRateLimiter, *mockHealthTracker) {
@@ -21,7 +23,7 @@ func newListTool() (*ListAgentsTool, *mockRegistry, *mockRateLimiter, *mockHealt
 
 func TestList_Empty(t *testing.T) {
 	tool, reg, _, _ := newListTool()
-	reg.ListFn = func() []*AgentEntry { return nil }
+	reg.ListFn = func() []*registry.RegisteredAgent { return nil }
 
 	result, output, err := tool.Handle(context.Background(), nil, &ListAgentsInput{})
 	if err != nil {
@@ -41,8 +43,8 @@ func TestList_Empty(t *testing.T) {
 func TestList_WithAgents(t *testing.T) {
 	tool, reg, rl, ht := newListTool()
 
-	reg.ListFn = func() []*AgentEntry {
-		return []*AgentEntry{
+	reg.ListFn = func() []*registry.RegisteredAgent {
+		return []*registry.RegisteredAgent{
 			{Alias: "agent-one", URL: "http://one.example.com"},
 			{Alias: "agent-two", URL: "http://two.example.com"},
 		}
@@ -88,8 +90,8 @@ func TestList_WithAgents(t *testing.T) {
 func TestList_UnhealthyShowsFailures(t *testing.T) {
 	tool, reg, rl, ht := newListTool()
 
-	reg.ListFn = func() []*AgentEntry {
-		return []*AgentEntry{
+	reg.ListFn = func() []*registry.RegisteredAgent {
+		return []*registry.RegisteredAgent{
 			{Alias: "sick-agent", URL: "http://sick.example.com"},
 		}
 	}
