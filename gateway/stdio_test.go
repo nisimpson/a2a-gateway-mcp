@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/internal/tool"
 )
 
 // TestStdioIntegration_ListAgentsEmpty verifies that a freshly started server
@@ -29,7 +30,14 @@ func TestStdioIntegration_ListAgentsEmpty(t *testing.T) {
 
 	text := getTextContent(t, result)
 	if text != "[]" {
-		t.Errorf("expected empty JSON array, got %q", text)
+		// New structured output format wraps agents in object
+		var output tool.ListAgentsOutput
+		if err := json.Unmarshal([]byte(text), &output); err != nil {
+			t.Fatalf("expected empty JSON array or valid agents output, got %q", text)
+		}
+		if len(output.Agents) != 0 {
+			t.Errorf("expected empty agents list, got %d", len(output.Agents))
+		}
 	}
 }
 
@@ -70,10 +78,11 @@ func TestStdioIntegration_ConnectListDisconnectFlow(t *testing.T) {
 	}
 
 	listText := getTextContent(t, listResult)
-	var agents []listAgentEntry
-	if err := json.Unmarshal([]byte(listText), &agents); err != nil {
+	var listOutput tool.ListAgentsOutput
+	if err := json.Unmarshal([]byte(listText), &listOutput); err != nil {
 		t.Fatalf("failed to parse list_agents response: %v", err)
 	}
+	agents := listOutput.Agents
 	if len(agents) != 1 {
 		t.Fatalf("expected 1 agent, got %d", len(agents))
 	}
@@ -111,8 +120,12 @@ func TestStdioIntegration_ConnectListDisconnectFlow(t *testing.T) {
 	}
 
 	listText2 := getTextContent(t, listResult2)
-	if listText2 != "[]" {
-		t.Errorf("expected empty JSON array after disconnect, got %q", listText2)
+	var listOutput2 tool.ListAgentsOutput
+	if err := json.Unmarshal([]byte(listText2), &listOutput2); err != nil {
+		t.Fatalf("failed to parse list_agents response: %v", err)
+	}
+	if len(listOutput2.Agents) != 0 {
+		t.Errorf("expected empty agents list after disconnect, got %d", len(listOutput2.Agents))
 	}
 }
 
@@ -161,10 +174,11 @@ func TestStdioIntegration_MultipleAgentsFlow(t *testing.T) {
 	}
 
 	listText := getTextContent(t, listResult)
-	var agents []listAgentEntry
-	if err := json.Unmarshal([]byte(listText), &agents); err != nil {
+	var listOutput tool.ListAgentsOutput
+	if err := json.Unmarshal([]byte(listText), &listOutput); err != nil {
 		t.Fatalf("failed to parse list_agents response: %v", err)
 	}
+	agents := listOutput.Agents
 	if len(agents) != 3 {
 		t.Fatalf("expected 3 agents, got %d", len(agents))
 	}
@@ -197,10 +211,11 @@ func TestStdioIntegration_MultipleAgentsFlow(t *testing.T) {
 	}
 
 	listText2 := getTextContent(t, listResult2)
-	var agents2 []listAgentEntry
-	if err := json.Unmarshal([]byte(listText2), &agents2); err != nil {
+	var listOutput2 tool.ListAgentsOutput
+	if err := json.Unmarshal([]byte(listText2), &listOutput2); err != nil {
 		t.Fatalf("failed to parse list_agents response: %v", err)
 	}
+	agents2 := listOutput2.Agents
 	if len(agents2) != 2 {
 		t.Fatalf("expected 2 agents after disconnect, got %d", len(agents2))
 	}

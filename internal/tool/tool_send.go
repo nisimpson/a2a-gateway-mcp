@@ -445,7 +445,7 @@ func (s *SendMessageTool) handleTaskResult(ctx context.Context, a2aClient *a2acl
 		case a2a.TaskStateCanceled:
 			return nil, &SendMessageOutput{Task: polledTask}, errors.New("task was canceled by the agent")
 		default:
-			return nil, &SendMessageOutput{Task: polledTask}, errors.New(fmt.Sprintf("timeout waiting for task completion (state: %s)", polledTask.Status.State))
+			return nil, &SendMessageOutput{Task: polledTask}, fmt.Errorf("timeout waiting for task completion (state: %s)", polledTask.Status.State)
 		}
 
 	default:

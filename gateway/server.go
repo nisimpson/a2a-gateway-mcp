@@ -256,7 +256,7 @@ func NewServer(opts ...Option) *Server {
 		s.pingStrategy = NewDefaultPingStrategy(s.httpClient)
 	}
 
-	s.registerTools()
+	s.registerToolsV2()
 
 	return s
 }
