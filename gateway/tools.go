@@ -19,8 +19,8 @@ func (s *Server) registerToolsV2() {
 		RateLimiter:            s.rateLimiters,
 		HistoryBackend:         s.historyBackendAdapter(),
 		A2AClientResolver:      s.clients,
-		CallerCardInjector:     s.callerCardInjectorAdapter(),
-		CallerCardStore:        &callerCardStore{server: s},
+		CallerCardInjector:     s.callerCardStore,
+		CallerCardStore:        s.callerCardStore,
 		ContextStore:           s.contextStore,
 		HistoryRecorder:        s.historyRecorderAdapter(),
 		AgentCardFetcher:       s.agentCardFetcherAdapter(),
@@ -105,20 +105,6 @@ func (a *agentRegistryAdapter) SupportsStreaming(resolved *registry.ResolveResul
 		return false
 	}
 	return entry.Card.Capabilities.Streaming
-}
-
-// --- CallerCardInjector adapter ---
-
-func (s *Server) callerCardInjectorAdapter() *callerCardInjectorAdapter {
-	return &callerCardInjectorAdapter{server: s}
-}
-
-type callerCardInjectorAdapter struct {
-	server *Server
-}
-
-func (a *callerCardInjectorAdapter) InjectCallerCard(metadata map[string]any) map[string]any {
-	return a.server.injectCallerCard(metadata)
 }
 
 // --- HistoryBackend adapter ---

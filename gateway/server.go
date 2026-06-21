@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -160,9 +159,7 @@ type Server struct {
 	defaultRateLimit *RateLimitConfig // nil means no global default (unlimited)
 
 	// Requirement: CAC-1.9 — global caller card state
-	callerCard    *registry.CallerCard // nil when no card is registered
-	callerCardKey string      // metadata key; empty means use default
-	callerCardMu  sync.RWMutex
+	callerCardStore *registry.CallerCardStore
 
 	// History subsystem — Requirements: 1.3, 6.3
 	historyBackend history.Backend
@@ -196,8 +193,9 @@ func NewServer(opts ...Option) *Server {
 
 	s := &Server{
 		mcpServer:     mcpServer,
-		registry:      registry.NewAgentRegistry(),
-		contextStore:  registry.NewContextStore(),
+		registry:        registry.NewAgentRegistry(),
+		contextStore:    registry.NewContextStore(),
+		callerCardStore: registry.NewCallerCardStore(),
 		httpClient:    cfg.httpClient,
 		pollTimeout:   cfg.pollTimeout,
 		streamTimeout: cfg.streamTimeout,
