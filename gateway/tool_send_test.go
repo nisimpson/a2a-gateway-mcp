@@ -1948,3 +1948,139 @@ func TestPropertySendAlwaysAttemptsUnhealthy(t *testing.T) {
 
 	properties.TestingRun(t)
 }
+
+// =============================================================================
+// Task 6.5: Unit tests for error states with structured content
+// Requirements: SRES-3.3, SRES-3.4, SRES-1.5
+// =============================================================================
+
+func TestHandleTaskResult_Failed_StructuredContent(t *testing.T) {
+	// A failed task should return IsError=true AND the *a2a.Task as structured content.
+	srv := NewServer()
+	resolved := &ResolveResult{IsAlias: true, Alias: "fail-agent", URL: "http://example.com"}
+
+	task := &a2a.Task{
+		ID:        "task-fail-sc",
+		ContextID: "ctx-fail-sc",
+		Status: a2a.TaskStatus{
+			State:   a2a.TaskStateFailed,
+			Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("something went wrong")),
+		},
+	}
+
+	result, structured, err := srv.handleTaskResult(context.Background(), nil, task, resolved, "fail-agent", taskPollTimeout)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected IsError=true for failed task")
+	}
+
+	// Verify the structured content is wrapped in SendMessageResponse with the same task pointer.
+	if structured == nil {
+		t.Fatal("expected non-nil structured content")
+	}
+	if structured.Task != task {
+		t.Error("expected structured content to contain the exact same task pointer")
+	}
+}
+
+func TestHandleTaskResult_Canceled_StructuredContent(t *testing.T) {
+	// A canceled task should return IsError=true AND the *a2a.Task as structured content.
+	srv := NewServer()
+	resolved := &ResolveResult{IsAlias: true, Alias: "cancel-agent", URL: "http://example.com"}
+
+	task := &a2a.Task{
+		ID:        "task-cancel-sc",
+		ContextID: "ctx-cancel-sc",
+		Status:    a2a.TaskStatus{State: a2a.TaskStateCanceled},
+	}
+
+	result, structured, err := srv.handleTaskResult(context.Background(), nil, task, resolved, "cancel-agent", taskPollTimeout)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected IsError=true for canceled task")
+	}
+
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	if textContent.Text != "task was canceled by the agent" {
+		t.Errorf("expected cancel message, got %q", textContent.Text)
+	}
+
+	// Verify the structured content is wrapped in SendMessageResponse with the same task pointer.
+	if structured == nil {
+		t.Fatal("expected non-nil structured content")
+	}
+	if structured.Task != task {
+		t.Error("expected structured content to contain the exact same task pointer")
+	}
+}
+
+func TestHandleTaskResult_Polled_StructuredContent(t *testing.T) {
+	// A task in "working" state should be polled, and the final polled task
+	// should be returned as structured content.
+	var callCount int
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, _ := readJSONRPCRequest(r)
+		callCount++
+		// GetTask returns a completed task.
+		polledTask := &a2a.Task{
+			ID:        "task-poll-sc",
+			ContextID: "ctx-poll-sc",
+			Status:    a2a.TaskStatus{State: a2a.TaskStateCompleted},
+			Artifacts: []*a2a.Artifact{
+				{Parts: a2a.ContentParts{a2a.NewTextPart("polled result")}},
+			},
+		}
+		writeJSONRPCResult(w, req.ID, polledTask)
+	}))
+	defer agent.Close()
+
+	srv := newTestServerWithAgent("poll-sc-agent", agent.URL)
+	resolved := &ResolveResult{IsAlias: true, Alias: "poll-sc-agent", URL: agent.URL}
+
+	// Resolve an a2aclient.Client for the test server.
+	a2aClient, err := srv.clients.Resolve(context.Background(), resolved)
+	if err != nil {
+		t.Fatalf("failed to resolve client: %v", err)
+	}
+
+	// Task in working state with an ID triggers polling.
+	workingTask := &a2a.Task{
+		ID:        "task-poll-sc",
+		ContextID: "ctx-working",
+		Status:    a2a.TaskStatus{State: a2a.TaskStateWorking},
+	}
+
+	result, structured, taskErr := srv.handleTaskResult(context.Background(), a2aClient, workingTask, resolved, "poll-sc-agent", taskPollTimeout)
+	if taskErr != nil {
+		t.Fatalf("unexpected error: %v", taskErr)
+	}
+	if result.IsError {
+		t.Fatalf("expected success after polling, got error: %v", result.Content)
+	}
+
+	// Verify polling happened.
+	if callCount < 1 {
+		t.Errorf("expected at least 1 poll call, got %d", callCount)
+	}
+
+	// Verify the structured content is the polled task wrapped in SendMessageResponse.
+	if structured == nil {
+		t.Fatal("expected non-nil structured content")
+	}
+	if structured.Task == nil {
+		t.Fatal("expected SendMessageResponse.Task to be non-nil")
+	}
+	if structured.Task.Status.State != a2a.TaskStateCompleted {
+		t.Errorf("expected structured content to have completed state, got %v", structured.Task.Status.State)
+	}
+	if structured.Task.ID != "task-poll-sc" {
+		t.Errorf("expected structured task ID %q, got %q", "task-poll-sc", structured.Task.ID)
+	}
+}

@@ -4,13 +4,13 @@ go 1.25.11
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.3.1
+	github.com/google/jsonschema-go v0.4.3
 	github.com/leanovate/gopter v0.2.11
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	golang.org/x/time v0.15.0
 )
 
 require (
-	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect

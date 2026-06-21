@@ -238,7 +238,7 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 
 	// Requirement: STRM-1.1, STRM-1.5 — route to streaming when supported.
 	if supportsStreaming(s.registry, resolved) {
-		result, err := s.handleStreamingMessage(ctx, req, a2aClient, sendReq, resolved, input.Agent, s.effectiveStreamTimeout(input.PollTimeoutSeconds))
+		result, structured, err := s.handleStreamingMessage(ctx, req, a2aClient, sendReq, resolved, input.Agent, s.effectiveStreamTimeout(input.PollTimeoutSeconds))
 		if err != nil {
 			// Requirement: HLTH-1.1, HLTH-8.3 — record health based on error classification.
 			if resolved.IsAlias {
@@ -257,7 +257,7 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 			s.healthTracker.RecordSuccess(resolved.Alias)
 		}
 		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(result), extractResultContextID(result), extractResultTaskID(result), result.IsError)
-		return result, nil, nil
+		return result, structured, nil
 	}
 
 	// Call SDK client.
@@ -292,9 +292,9 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 		if resolved.IsAlias && v.ContextID != "" {
 			s.contextStore.Set(input.Agent, v.ContextID)
 		}
-		msgResult := FormatMessageResponse(v)
+		msgResult, structured := FormatMessageResponse(v)
 		s.recordHistory(ctx, input.Agent, sentMessageText(input), extractResultText(msgResult), extractResultContextID(msgResult), extractResultTaskID(msgResult), msgResult.IsError)
-		return msgResult, nil, nil
+		return msgResult, structured, nil
 	default:
 		defaultResult := &mcp.CallToolResult{
 			IsError: true,
@@ -307,27 +307,31 @@ func (s *Server) handleSendMessage(ctx context.Context, req *mcp.CallToolRequest
 
 // handleTaskResult processes a *a2a.Task result from SendMessage, handling
 // all task states including polling for non-terminal states.
-func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Client, task *a2a.Task, resolved *ResolveResult, agent string, pollTimeout time.Duration) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Client, task *a2a.Task, resolved *ResolveResult, agent string, pollTimeout time.Duration) (*mcp.CallToolResult, *SendMessageResponse, error) {
 	switch task.Status.State {
 	case a2a.TaskStateCompleted:
 		if resolved.IsAlias && task.ContextID != "" {
 			s.contextStore.Set(agent, task.ContextID)
 		}
-		return FormatTaskResponse(task), nil, nil
+		result, structured := FormatTaskResponse(task)
+		return result, structured, nil
 
 	case a2a.TaskStateInputRequired:
 		if resolved.IsAlias && task.ContextID != "" {
 			s.contextStore.Set(agent, task.ContextID)
 		}
-		return FormatInputRequiredResponse(task), nil, nil
+		result, structured := FormatInputRequiredResponse(task)
+		return result, structured, nil
 
 	case a2a.TaskStateAuthRequired:
 		if resolved.IsAlias && task.ContextID != "" {
 			s.contextStore.Set(agent, task.ContextID)
 		}
-		return FormatInterruptedResponse(task, "auth-required"), nil, nil
+		result, structured := FormatInterruptedResponse(task, "auth-required")
+		return result, structured, nil
 
 	case a2a.TaskStateFailed:
+		// Requirement: SRES-3.3 — failed task returns structured content with isError
 		if resolved.IsAlias && task.ContextID != "" {
 			s.contextStore.Set(agent, task.ContextID)
 		}
@@ -341,16 +345,17 @@ func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Clie
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{&mcp.TextContent{Text: failMsg}},
-		}, nil, nil
+		}, &SendMessageResponse{Task: task}, nil
 
 	case a2a.TaskStateCanceled:
+		// Requirement: SRES-3.4 — canceled task returns structured content with isError
 		if resolved.IsAlias && task.ContextID != "" {
 			s.contextStore.Set(agent, task.ContextID)
 		}
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{&mcp.TextContent{Text: "task was canceled by the agent"}},
-		}, nil, nil
+		}, &SendMessageResponse{Task: task}, nil
 
 	case a2a.TaskStateWorking, a2a.TaskStateSubmitted:
 		// Known non-terminal states — poll for completion if task has an ID.
@@ -373,17 +378,21 @@ func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Clie
 			}, nil, nil
 		}
 
+		// Requirement: SRES-1.5 — polled task returns structured content
 		// Re-evaluate the terminal state after polling.
 		if resolved.IsAlias && polledTask.ContextID != "" {
 			s.contextStore.Set(agent, polledTask.ContextID)
 		}
 		switch polledTask.Status.State {
 		case a2a.TaskStateCompleted:
-			return FormatTaskResponse(polledTask), nil, nil
+			result, structured := FormatTaskResponse(polledTask)
+			return result, structured, nil
 		case a2a.TaskStateInputRequired:
-			return FormatInputRequiredResponse(polledTask), nil, nil
+			result, structured := FormatInputRequiredResponse(polledTask)
+			return result, structured, nil
 		case a2a.TaskStateAuthRequired:
-			return FormatInterruptedResponse(polledTask, "auth-required"), nil, nil
+			result, structured := FormatInterruptedResponse(polledTask, "auth-required")
+			return result, structured, nil
 		case a2a.TaskStateFailed:
 			failMsg := "task failed"
 			if polledTask.Status.Message != nil {
@@ -395,17 +404,17 @@ func (s *Server) handleTaskResult(ctx context.Context, a2aClient *a2aclient.Clie
 			return &mcp.CallToolResult{
 				IsError: true,
 				Content: []mcp.Content{&mcp.TextContent{Text: failMsg}},
-			}, nil, nil
+			}, &SendMessageResponse{Task: polledTask}, nil
 		case a2a.TaskStateCanceled:
 			return &mcp.CallToolResult{
 				IsError: true,
 				Content: []mcp.Content{&mcp.TextContent{Text: "task was canceled by the agent"}},
-			}, nil, nil
+			}, &SendMessageResponse{Task: polledTask}, nil
 		default:
 			return &mcp.CallToolResult{
 				IsError: true,
 				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("timeout waiting for task completion (state: %s)", polledTask.Status.State)}},
-			}, nil, nil
+			}, &SendMessageResponse{Task: polledTask}, nil
 		}
 
 	default:

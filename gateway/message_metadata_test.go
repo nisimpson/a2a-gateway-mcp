@@ -472,7 +472,7 @@ func TestProperty_FallbackMessageNeverProduced(t *testing.T) {
 
 			// Test via FormatMessageResponse.
 			msg := &a2a.Message{Role: a2a.MessageRoleAgent, Parts: parts}
-			mcpResult := FormatMessageResponse(msg)
+			mcpResult, _ := FormatMessageResponse(msg)
 			for _, content := range mcpResult.Content {
 				if tc, ok := content.(*mcp.TextContent); ok {
 					if strings.Contains(tc.Text, fallbackMsg) {

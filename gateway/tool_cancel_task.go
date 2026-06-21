@@ -55,5 +55,6 @@ func (s *Server) handleCancelTask(ctx context.Context, _ *mcp.CallToolRequest, i
 	}
 
 	// For other states, return the task formatted by state (unexpected but handle gracefully).
-	return FormatTaskResponse(task), nil, nil
+	result, _ := FormatTaskResponse(task)
+	return result, nil, nil
 }

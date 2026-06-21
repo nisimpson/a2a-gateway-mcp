@@ -21,9 +21,11 @@ const (
 
 // broadcastResult holds the outcome of sending a message to a single agent.
 type broadcastResult struct {
-	Status   string `json:"status"`
-	Response string `json:"response,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Status   string       `json:"status"`
+	Response string       `json:"response,omitempty"`
+	Error    string       `json:"error,omitempty"`
+	Task     *a2a.Task    `json:"task,omitempty"`
+	Message  *a2a.Message `json:"message,omitempty"`
 }
 
 // handleBroadcastMessage sends the same message to multiple agents simultaneously
@@ -58,26 +60,41 @@ func (s *Server) handleBroadcastMessage(ctx context.Context, _ *mcp.CallToolRequ
 	}
 
 	// Launch one goroutine per alias for concurrent execution.
+	type agentOutcome struct {
+		result   *broadcastResult
+		response *SendMessageResponse
+	}
+
 	var (
-		mu      sync.Mutex
-		wg      sync.WaitGroup
-		results = make(map[string]*broadcastResult)
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+		outcomes = make(map[string]*agentOutcome)
 	)
 
 	for _, alias := range input.Aliases {
 		wg.Add(1)
 		go func(alias string) {
 			defer wg.Done()
-			result := s.broadcastToAgent(ctx, alias, input.Message, input.Parts, input.Metadata, timeoutSeconds)
+			result, resp := s.broadcastToAgent(ctx, alias, input.Message, input.Parts, input.Metadata, timeoutSeconds)
 			mu.Lock()
-			results[alias] = result
+			outcomes[alias] = &agentOutcome{result: result, response: resp}
 			mu.Unlock()
 		}(alias)
 	}
 
 	wg.Wait()
 
-	// Serialize results as JSON.
+	// Build legacy text results and structured content map.
+	results := make(map[string]*broadcastResult, len(outcomes))
+	structured := make(map[string]*SendMessageResponse, len(outcomes))
+	for alias, outcome := range outcomes {
+		results[alias] = outcome.result
+		if outcome.response != nil {
+			structured[alias] = outcome.response
+		}
+	}
+
+	// Serialize results as JSON (legacy text content).
 	resultJSON, err := json.Marshal(results)
 	if err != nil {
 		return &mcp.CallToolResult{
@@ -88,7 +105,7 @@ func (s *Server) handleBroadcastMessage(ctx context.Context, _ *mcp.CallToolRequ
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(resultJSON)}},
-	}, nil, nil
+	}, structured, nil
 }
 
 // broadcastSentText returns the text representation of the sent message for history recording
@@ -114,7 +131,8 @@ func broadcastSentText(message string, parts []InputPart) string {
 }
 
 // broadcastToAgent sends a message to a single agent and returns the result.
-func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, parts []InputPart, metadata map[string]any, timeoutSeconds int) *broadcastResult {
+// The second return value is a *SendMessageResponse for structured content (nil on error/skip).
+func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, parts []InputPart, metadata map[string]any, timeoutSeconds int) (*broadcastResult, *SendMessageResponse) {
 	// Resolve alias from registry.
 	entry := s.registry.Lookup(alias)
 	if entry == nil {
@@ -123,7 +141,7 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 			Error:  fmt.Sprintf("alias %q is not registered", alias),
 		}
 		s.recordBroadcastHistory(ctx, alias, message, parts, result)
-		return result
+		return result, nil
 	}
 
 	// Health check BEFORE rate limit — skip unhealthy agents without consuming
@@ -134,7 +152,7 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 		if state.Status == HealthStatusUnhealthy {
 			result := &broadcastResult{Status: "skipped", Error: "agent is unhealthy"}
 			s.recordBroadcastHistory(ctx, alias, message, parts, result)
-			return result
+			return result, nil
 		}
 	}
 
@@ -145,7 +163,7 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 			Error:  fmt.Sprintf("rate limited: agent %q has exceeded its rate limit", alias),
 		}
 		s.recordBroadcastHistory(ctx, alias, message, parts, result)
-		return result
+		return result, nil
 	}
 
 	// Create per-agent timeout context.
@@ -161,7 +179,7 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 			Error:  fmt.Sprintf("failed to resolve client: %v", err),
 		}
 		s.recordBroadcastHistory(ctx, alias, message, parts, result)
-		return result
+		return result, nil
 	}
 
 	// Build content parts from message/parts input.
@@ -172,7 +190,7 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 			Error:  err.Error(),
 		}
 		s.recordBroadcastHistory(ctx, alias, message, parts, result)
-		return result
+		return result, nil
 	}
 
 	// Build A2A message.
@@ -189,7 +207,7 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 
 	// Requirement: STRM-5.1, STRM-5.2 — use streaming when supported.
 	if supportsStreaming(s.registry, resolved) {
-		result, reachable := s.broadcastToAgentStreaming(agentCtx, a2aClient, sendReq, resolved, alias, timeoutSeconds)
+		result, resp, reachable := s.broadcastToAgentStreaming(agentCtx, a2aClient, sendReq, resolved, alias, timeoutSeconds)
 		// Record health outcome for streaming path.
 		if reachable {
 			s.healthTracker.RecordSuccess(alias)
@@ -198,7 +216,7 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 			s.recordBroadcastHealthOutcome(agentCtx, alias, fmt.Errorf("%s", result.Error))
 		}
 		s.recordBroadcastHistory(ctx, alias, message, parts, result)
-		return result
+		return result, resp
 	}
 
 	sendResult, err := a2aClient.SendMessage(agentCtx, sendReq)
@@ -210,7 +228,7 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 			Error:  err.Error(),
 		}
 		s.recordBroadcastHistory(ctx, alias, message, parts, result)
-		return result
+		return result, nil
 	}
 
 	// Successful HTTP response — record success.
@@ -219,18 +237,20 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 	// Type switch on result.
 	switch v := sendResult.(type) {
 	case *a2a.Message:
+		// Requirement: SRES-4.2 — broadcast includes raw message
 		text := extractContentFromMessageParts(v.Parts)
 		result := &broadcastResult{
 			Status:   "success",
 			Response: text,
+			Message:  v,
 		}
 		s.recordBroadcastHistory(ctx, alias, message, parts, result)
-		return result
+		return result, &SendMessageResponse{Message: v}
 
 	case *a2a.Task:
-		result := s.handleBroadcastTaskResult(v)
+		result, resp := s.handleBroadcastTaskResult(v)
 		s.recordBroadcastHistory(ctx, alias, message, parts, result)
-		return result
+		return result, resp
 
 	default:
 		result := &broadcastResult{
@@ -238,7 +258,7 @@ func (s *Server) broadcastToAgent(ctx context.Context, alias, message string, pa
 			Error:  "unrecognized response format",
 		}
 		s.recordBroadcastHistory(ctx, alias, message, parts, result)
-		return result
+		return result, nil
 	}
 }
 
@@ -272,9 +292,10 @@ func (s *Server) recordBroadcastHealthOutcome(_ context.Context, alias string, e
 // broadcastToAgentStreaming sends a message using streaming and converts
 // the result to a broadcastResult with the same shape as non-streaming.
 // Requirements: STRM-5.1, STRM-5.3, STRM-5.4
-// The second return value indicates whether the agent was reachable:
-// true means a response was received (even if the task failed),
-// false means a transport-level error prevented communication.
+// Returns:
+//   - *broadcastResult: legacy text result
+//   - *SendMessageResponse: structured content (nil on transport error)
+//   - bool: whether the agent was reachable (true = response received, false = transport error)
 func (s *Server) broadcastToAgentStreaming(
 	ctx context.Context,
 	a2aClient *a2aclient.Client,
@@ -282,7 +303,7 @@ func (s *Server) broadcastToAgentStreaming(
 	resolved *ResolveResult,
 	alias string,
 	timeoutSeconds int,
-) (*broadcastResult, bool) {
+) (*broadcastResult, *SendMessageResponse, bool) {
 	// Requirement: STRM-5.3 — per-agent broadcast timeout is already applied
 	// via the parent ctx (agentCtx) from broadcastToAgent. No additional
 	// timeout needed here.
@@ -291,36 +312,41 @@ func (s *Server) broadcastToAgentStreaming(
 	state := &streamState{}
 	result, err := consumeStream(ctx, events, state)
 	if err != nil {
-		return &broadcastResult{Status: "error", Error: err.Error()}, false
+		return &broadcastResult{Status: "error", Error: err.Error()}, nil, false
 	}
 
 	// Convert streamResult to broadcastResult using the same logic as non-streaming path.
 	switch {
 	case result.task != nil:
-		return s.handleBroadcastTaskResult(result.task), true
+		br, resp := s.handleBroadcastTaskResult(result.task)
+		return br, resp, true
 
 	case result.message != nil:
 		text := extractContentFromMessageParts(result.message.Parts)
-		return &broadcastResult{Status: "success", Response: text}, true
+		return &broadcastResult{Status: "success", Response: text, Message: result.message}, &SendMessageResponse{Message: result.message}, true
 
 	case result.terminatedByStatus:
 		task := buildTaskFromState(result.state)
-		return s.handleBroadcastTaskResult(task), true
+		br, resp := s.handleBroadcastTaskResult(task)
+		return br, resp, true
 
 	default:
-		return &broadcastResult{Status: "error", Error: "no terminal event received"}, false
+		return &broadcastResult{Status: "error", Error: "no terminal event received"}, nil, false
 	}
 }
 
 // handleBroadcastTaskResult processes a task result in the broadcast context.
-func (s *Server) handleBroadcastTaskResult(task *a2a.Task) *broadcastResult {
+// Returns the legacy broadcastResult and a *SendMessageResponse for structured content.
+func (s *Server) handleBroadcastTaskResult(task *a2a.Task) (*broadcastResult, *SendMessageResponse) {
+	// Requirement: SRES-4.1, SRES-4.3 — broadcast includes raw task in successful results
 	switch task.Status.State {
 	case a2a.TaskStateCompleted:
 		text := extractContentFromArtifacts(task.Artifacts)
 		return &broadcastResult{
 			Status:   "success",
 			Response: text,
-		}
+			Task:     task,
+		}, &SendMessageResponse{Task: task}
 	case a2a.TaskStateInputRequired:
 		responseText := ""
 		if task.Status.Message != nil {
@@ -332,7 +358,8 @@ func (s *Server) handleBroadcastTaskResult(task *a2a.Task) *broadcastResult {
 		return &broadcastResult{
 			Status:   "input-required",
 			Response: responseText,
-		}
+			Task:     task,
+		}, &SendMessageResponse{Task: task}
 	case a2a.TaskStateAuthRequired:
 		responseText := ""
 		if task.Status.Message != nil {
@@ -344,8 +371,10 @@ func (s *Server) handleBroadcastTaskResult(task *a2a.Task) *broadcastResult {
 		return &broadcastResult{
 			Status:   "auth-required",
 			Response: responseText,
-		}
+			Task:     task,
+		}, &SendMessageResponse{Task: task}
 	case a2a.TaskStateFailed:
+		// Requirement: SRES-4.4 — error/skipped results omit task and message
 		failMsg := "task failed"
 		if task.Status.Message != nil {
 			text := extractStatusMessageText(task.Status.Message)
@@ -356,16 +385,17 @@ func (s *Server) handleBroadcastTaskResult(task *a2a.Task) *broadcastResult {
 		return &broadcastResult{
 			Status: "error",
 			Error:  failMsg,
-		}
+		}, nil
 	case a2a.TaskStateCanceled:
+		// Requirement: SRES-4.4 — error/skipped results omit task and message
 		return &broadcastResult{
 			Status: "error",
 			Error:  "task was canceled by the agent",
-		}
+		}, nil
 	default:
 		return &broadcastResult{
 			Status: "error",
 			Error:  fmt.Sprintf("timeout waiting for task completion (state: %s)", task.Status.State),
-		}
+		}, nil
 	}
 }

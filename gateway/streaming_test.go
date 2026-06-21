@@ -488,17 +488,17 @@ func TestPropertyTaskEventFormattingEquivalence(t *testing.T) {
 
 			// Get the result from the streaming format function.
 			server := &Server{contextStore: NewContextStore(), registry: NewAgentRegistry()}
-			streamingResult := server.formatStreamTask(task)
+			streamingResult, _ := server.formatStreamTask(task)
 
 			// Get the expected result from the direct format functions.
 			var expected *mcp.CallToolResult
 			switch state {
 			case a2a.TaskStateCompleted:
-				expected = FormatTaskResponse(task)
+				expected, _ = FormatTaskResponse(task)
 			case a2a.TaskStateInputRequired:
-				expected = FormatInputRequiredResponse(task)
+				expected, _ = FormatInputRequiredResponse(task)
 			case a2a.TaskStateAuthRequired:
-				expected = FormatInterruptedResponse(task, "auth-required")
+				expected, _ = FormatInterruptedResponse(task, "auth-required")
 			case a2a.TaskStateFailed:
 				failMsg := "task failed"
 				if task.Status.Message != nil {
@@ -584,10 +584,10 @@ func TestPropertyMessageEventFormatting(t *testing.T) {
 			}
 
 			// Format via streaming path.
-			streamingResult := FormatMessageResponse(result.message)
+			streamingResult, _ := FormatMessageResponse(result.message)
 
 			// Format directly.
-			expected := FormatMessageResponse(msg)
+			expected, _ := FormatMessageResponse(msg)
 
 			return callToolResultsEqual(streamingResult, expected)
 		},
@@ -841,7 +841,7 @@ func TestPropertyBroadcastOutputEquivalence(t *testing.T) {
 			server := &Server{contextStore: NewContextStore(), registry: NewAgentRegistry()}
 
 			// Non-streaming path: directly call handleBroadcastTaskResult.
-			nonStreamingResult := server.handleBroadcastTaskResult(task)
+			nonStreamingResult, _ := server.handleBroadcastTaskResult(task)
 
 			// Streaming path: simulate consuming a stream that yields this task,
 			// then converting via broadcastToAgentStreaming's logic.
@@ -858,10 +858,10 @@ func TestPropertyBroadcastOutputEquivalence(t *testing.T) {
 			var streamingResult *broadcastResult
 			switch {
 			case streamRes.task != nil:
-				streamingResult = server.handleBroadcastTaskResult(streamRes.task)
+				streamingResult, _ = server.handleBroadcastTaskResult(streamRes.task)
 			case streamRes.terminatedByStatus:
 				builtTask := buildTaskFromState(streamRes.state)
-				streamingResult = server.handleBroadcastTaskResult(builtTask)
+				streamingResult, _ = server.handleBroadcastTaskResult(builtTask)
 			default:
 				return false
 			}
@@ -965,7 +965,7 @@ func TestPropertyBroadcastOutputEquivalence(t *testing.T) {
 				return false
 			}
 			task := buildTaskFromState(streamRes.state)
-			streamingResult := server.handleBroadcastTaskResult(task)
+			streamingResult, _ := server.handleBroadcastTaskResult(task)
 
 			// Build the equivalent task directly for non-streaming comparison.
 			directTask := &a2a.Task{
@@ -982,7 +982,7 @@ func TestPropertyBroadcastOutputEquivalence(t *testing.T) {
 					Parts: a2a.ContentParts{a2a.NewTextPart(fmt.Sprintf("content-%d", i))},
 				})
 			}
-			nonStreamingResult := server.handleBroadcastTaskResult(directTask)
+			nonStreamingResult, _ := server.handleBroadcastTaskResult(directTask)
 
 			// Compare broadcastResult fields.
 			return nonStreamingResult.Status == streamingResult.Status &&
@@ -1689,4 +1689,143 @@ func TestPropertyErrorYieldsMCPError(t *testing.T) {
 	))
 
 	properties.TestingRun(t)
+}
+
+// =============================================================================
+// Task 6.5: Unit tests for streaming structured content
+// Requirements: SRES-5.1, SRES-5.2
+// =============================================================================
+
+func TestStreamingMessage_TaskResult_StructuredContent(t *testing.T) {
+	// When the streaming path receives a full *a2a.Task event, the structured
+	// content should be the task pointer.
+	task := &a2a.Task{
+		ID:        "task-stream-sc",
+		ContextID: "ctx-stream-sc",
+		Status:    a2a.TaskStatus{State: a2a.TaskStateCompleted},
+		Artifacts: []*a2a.Artifact{
+			{Parts: a2a.ContentParts{a2a.NewTextPart("streamed result")}},
+		},
+	}
+
+	// Simulate consuming a stream that yields this task.
+	events := []eventOrError{{event: task}}
+	state := &streamState{}
+	result, err := consumeStream(context.TODO(), mockIterator(events), state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.task == nil {
+		t.Fatal("expected result.task to be non-nil")
+	}
+
+	// Use formatStreamTask to get the CallToolResult and structured content.
+	server := &Server{contextStore: NewContextStore(), registry: NewAgentRegistry()}
+	mcpResult, structured := server.formatStreamTask(result.task)
+
+	if mcpResult.IsError {
+		t.Fatalf("expected success result, got error: %v", mcpResult.Content)
+	}
+
+	// Verify the structured content is wrapped in SendMessageResponse with the task pointer.
+	if structured == nil {
+		t.Fatal("expected non-nil structured content")
+	}
+	if structured.Task != task {
+		t.Error("expected structured content to contain the exact same task pointer")
+	}
+}
+
+func TestStreamingMessage_MessageResult_StructuredContent(t *testing.T) {
+	// When the streaming path receives a *a2a.Message event, the structured
+	// content should be the message pointer.
+	msg := &a2a.Message{
+		Role:      a2a.MessageRoleAgent,
+		Parts:     a2a.ContentParts{a2a.NewTextPart("streamed message")},
+		ContextID: "ctx-stream-msg",
+	}
+
+	// Simulate consuming a stream that yields this message.
+	events := []eventOrError{{event: msg}}
+	state := &streamState{}
+	result, err := consumeStream(context.TODO(), mockIterator(events), state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.message == nil {
+		t.Fatal("expected result.message to be non-nil")
+	}
+
+	// The handleStreamingMessage logic for a Message result uses FormatMessageResponse
+	// and then sets structured = result.message.
+	mcpResult, structured := FormatMessageResponse(result.message)
+	if mcpResult.IsError {
+		t.Fatalf("expected success result, got error: %v", mcpResult.Content)
+	}
+
+	// Verify the structured content is wrapped in SendMessageResponse with the message pointer.
+	if structured == nil {
+		t.Fatal("expected non-nil structured content")
+	}
+	if structured.Message != msg {
+		t.Error("expected structured content to contain the exact same message pointer")
+	}
+}
+
+// Validates: SRES-5.3
+func TestStreamingNonStreamingEquivalence_StructuredContent(t *testing.T) {
+	// Create a completed task with artifacts.
+	task := &a2a.Task{
+		ID:        "task-equiv-123",
+		ContextID: "ctx-equiv-456",
+		Status: a2a.TaskStatus{
+			State: a2a.TaskStateCompleted,
+		},
+		Artifacts: []*a2a.Artifact{
+			{
+				ID:    "art-1",
+				Parts: a2a.ContentParts{a2a.NewTextPart("hello from artifact")},
+			},
+		},
+	}
+
+	// Non-streaming path: FormatTaskResponse
+	nonStreamResult, nonStreamStructured := FormatTaskResponse(task)
+
+	// Streaming path: formatStreamTask (uses same format functions internally)
+	server := &Server{}
+	streamResult, streamStructured := server.formatStreamTask(task)
+
+	// Assert both produce the same structured content (same Task pointer).
+	if nonStreamStructured == nil {
+		t.Fatal("non-streaming structured content should not be nil")
+	}
+	if streamStructured == nil {
+		t.Fatal("streaming structured content should not be nil")
+	}
+	if nonStreamStructured.Task != streamStructured.Task {
+		t.Error("expected streaming and non-streaming to return the same Task pointer in structured content")
+	}
+	if nonStreamStructured.Task != task {
+		t.Error("expected structured content Task to be the original task pointer")
+	}
+
+	// Assert MCP results are equivalent.
+	if nonStreamResult.IsError != streamResult.IsError {
+		t.Errorf("IsError mismatch: non-streaming=%v, streaming=%v", nonStreamResult.IsError, streamResult.IsError)
+	}
+	if len(nonStreamResult.Content) != len(streamResult.Content) {
+		t.Fatalf("content length mismatch: non-streaming=%d, streaming=%d", len(nonStreamResult.Content), len(streamResult.Content))
+	}
+	for i := range nonStreamResult.Content {
+		nsText, nsOk := nonStreamResult.Content[i].(*mcp.TextContent)
+		sText, sOk := streamResult.Content[i].(*mcp.TextContent)
+		if nsOk != sOk {
+			t.Errorf("content[%d] type mismatch", i)
+			continue
+		}
+		if nsOk && nsText.Text != sText.Text {
+			t.Errorf("content[%d] text mismatch: non-streaming=%q, streaming=%q", i, nsText.Text, sText.Text)
+		}
+	}
 }

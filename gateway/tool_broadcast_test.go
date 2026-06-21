@@ -1047,6 +1047,274 @@ func TestPropertyBroadcastHealthFiltering(t *testing.T) {
 	properties.TestingRun(t)
 }
 
+// Feature: structured-responses, Property 3: Broadcast Raw Object Inclusion
+// **Validates: Requirements SRES-4.1, SRES-4.2, SRES-4.3**
+
+func TestPropertyBroadcastRawObjectInclusion(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	// States that produce "successful" broadcastResults (Task field set).
+	successStates := []a2a.TaskState{
+		a2a.TaskStateCompleted,
+		a2a.TaskStateInputRequired,
+		a2a.TaskStateAuthRequired,
+	}
+
+	// States that produce "error" broadcastResults (Task and Message nil).
+	errorStates := []a2a.TaskState{
+		a2a.TaskStateFailed,
+		a2a.TaskStateCanceled,
+		a2a.TaskStateWorking,   // falls into default case
+		a2a.TaskStateSubmitted, // falls into default case
+	}
+
+	// Generator for task state from a given set.
+	successStateGen := gen.OneConstOf(
+		a2a.TaskStateCompleted,
+		a2a.TaskStateInputRequired,
+		a2a.TaskStateAuthRequired,
+	)
+
+	errorStateGen := gen.OneConstOf(
+		a2a.TaskStateFailed,
+		a2a.TaskStateCanceled,
+		a2a.TaskStateWorking,
+		a2a.TaskStateSubmitted,
+	)
+
+	// Generator for optional text content.
+	textGen := gen.RegexMatch(`[a-zA-Z0-9 ]{0,32}`)
+
+	// Generator for optional task ID.
+	taskIDGen := gen.RegexMatch(`[a-z0-9\-]{1,16}`)
+
+	// Generator for optional context ID.
+	contextIDGen := gen.RegexMatch(`[a-z0-9\-]{0,16}`)
+
+	// Generator for number of artifacts (0-3).
+	numArtifactsGen := gen.IntRange(0, 3)
+
+	// Suppress unused variable warnings for documentation purposes.
+	_ = successStates
+	_ = errorStates
+
+	srv := NewServer()
+
+	properties.Property("successful task states set Task field to input task pointer", prop.ForAll(
+		func(state a2a.TaskState, taskID string, contextID string, statusMsg string, numArtifacts int) bool {
+			// Build a random task with the given state.
+			task := &a2a.Task{
+				ID:        a2a.TaskID(taskID),
+				ContextID: contextID,
+				Status: a2a.TaskStatus{
+					State: state,
+				},
+			}
+
+			// Add status message if non-empty.
+			if statusMsg != "" {
+				task.Status.Message = a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(statusMsg))
+			}
+
+			// Add artifacts.
+			if numArtifacts > 0 {
+				task.Artifacts = make([]*a2a.Artifact, numArtifacts)
+				for i := range numArtifacts {
+					task.Artifacts[i] = &a2a.Artifact{
+						Parts: a2a.ContentParts{a2a.NewTextPart(fmt.Sprintf("artifact-%d", i))},
+					}
+				}
+			}
+
+			result, _ := srv.handleBroadcastTaskResult(task)
+
+			// For successful states, the Task field must be the exact same pointer.
+			if result.Task != task {
+				t.Logf("state=%s: expected Task pointer equality", state)
+				return false
+			}
+
+			// Message field should be nil (this is a Task response, not a Message response).
+			if result.Message != nil {
+				t.Logf("state=%s: expected nil Message field", state)
+				return false
+			}
+
+			// Status should not be "error".
+			if result.Status == "error" {
+				t.Logf("state=%s: got unexpected error status", state)
+				return false
+			}
+
+			return true
+		},
+		successStateGen,
+		taskIDGen,
+		contextIDGen,
+		textGen,
+		numArtifactsGen,
+	))
+
+	properties.Property("error/non-success task states have nil Task and Message fields", prop.ForAll(
+		func(state a2a.TaskState, taskID string, contextID string, statusMsg string, numArtifacts int) bool {
+			// Build a random task with the given state.
+			task := &a2a.Task{
+				ID:        a2a.TaskID(taskID),
+				ContextID: contextID,
+				Status: a2a.TaskStatus{
+					State: state,
+				},
+			}
+
+			// Add status message if non-empty.
+			if statusMsg != "" {
+				task.Status.Message = a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(statusMsg))
+			}
+
+			// Add artifacts.
+			if numArtifacts > 0 {
+				task.Artifacts = make([]*a2a.Artifact, numArtifacts)
+				for i := range numArtifacts {
+					task.Artifacts[i] = &a2a.Artifact{
+						Parts: a2a.ContentParts{a2a.NewTextPart(fmt.Sprintf("artifact-%d", i))},
+					}
+				}
+			}
+
+			result, _ := srv.handleBroadcastTaskResult(task)
+
+			// For error states, Task and Message should be nil.
+			if result.Task != nil {
+				t.Logf("state=%s: expected nil Task field, got non-nil", state)
+				return false
+			}
+			if result.Message != nil {
+				t.Logf("state=%s: expected nil Message field, got non-nil", state)
+				return false
+			}
+
+			// Status should be "error".
+			if result.Status != "error" {
+				t.Logf("state=%s: expected status 'error', got %q", state, result.Status)
+				return false
+			}
+
+			return true
+		},
+		errorStateGen,
+		taskIDGen,
+		contextIDGen,
+		textGen,
+		numArtifactsGen,
+	))
+
+	properties.Property("existing Status, Response, and Error fields remain unchanged from legacy behavior", prop.ForAll(
+		func(state a2a.TaskState, taskID string, contextID string, statusMsg string, numArtifacts int) bool {
+			// Build a task with the given state.
+			task := &a2a.Task{
+				ID:        a2a.TaskID(taskID),
+				ContextID: contextID,
+				Status: a2a.TaskStatus{
+					State: state,
+				},
+			}
+
+			if statusMsg != "" {
+				task.Status.Message = a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(statusMsg))
+			}
+
+			if numArtifacts > 0 {
+				task.Artifacts = make([]*a2a.Artifact, numArtifacts)
+				for i := range numArtifacts {
+					task.Artifacts[i] = &a2a.Artifact{
+						Parts: a2a.ContentParts{a2a.NewTextPart(fmt.Sprintf("artifact-%d", i))},
+					}
+				}
+			}
+
+			result, _ := srv.handleBroadcastTaskResult(task)
+
+			// Verify legacy fields have correct values based on state.
+			switch state {
+			case a2a.TaskStateCompleted:
+				if result.Status != "success" {
+					return false
+				}
+				// Response should be text extracted from artifacts.
+				expectedText := extractContentFromArtifacts(task.Artifacts)
+				if result.Response != expectedText {
+					t.Logf("completed: expected Response=%q, got %q", expectedText, result.Response)
+					return false
+				}
+				if result.Error != "" {
+					return false
+				}
+
+			case a2a.TaskStateInputRequired:
+				if result.Status != "input-required" {
+					return false
+				}
+				if result.Error != "" {
+					return false
+				}
+
+			case a2a.TaskStateAuthRequired:
+				if result.Status != "auth-required" {
+					return false
+				}
+				if result.Error != "" {
+					return false
+				}
+
+			case a2a.TaskStateFailed:
+				if result.Status != "error" {
+					return false
+				}
+				if result.Error == "" {
+					return false
+				}
+
+			case a2a.TaskStateCanceled:
+				if result.Status != "error" {
+					return false
+				}
+				if result.Error != "task was canceled by the agent" {
+					return false
+				}
+
+			default:
+				// Working, Submitted, etc. fall into the timeout/default case.
+				if result.Status != "error" {
+					return false
+				}
+				if result.Error == "" {
+					return false
+				}
+			}
+
+			return true
+		},
+		gen.OneConstOf(
+			a2a.TaskStateCompleted,
+			a2a.TaskStateInputRequired,
+			a2a.TaskStateAuthRequired,
+			a2a.TaskStateFailed,
+			a2a.TaskStateCanceled,
+			a2a.TaskStateWorking,
+			a2a.TaskStateSubmitted,
+		),
+		taskIDGen,
+		contextIDGen,
+		textGen,
+		numArtifactsGen,
+	))
+
+	properties.TestingRun(t)
+}
+
 func TestHandleBroadcastMessage_UnrecognizedResponse(t *testing.T) {
 	// Agent that returns a JSON-RPC error (SDK will surface it as an error).
 	weirdAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1096,5 +1364,69 @@ func TestHandleBroadcastMessage_UnrecognizedResponse(t *testing.T) {
 	}
 	if r.Error == "" {
 		t.Error("expected non-empty error message for weird-agent")
+	}
+}
+
+// =============================================================================
+// Task 6.5: Unit test for broadcast error omitting raw fields
+// Requirements: SRES-4.4
+// =============================================================================
+
+func TestBroadcastResult_ErrorOmitsRawFields(t *testing.T) {
+	// Error and skipped results should have nil Task and Message fields.
+	srv := NewServer()
+
+	// Test failed task: handleBroadcastTaskResult should set Status="error" with nil Task/Message.
+	failedTask := &a2a.Task{
+		ID: "task-fail-broadcast",
+		Status: a2a.TaskStatus{
+			State:   a2a.TaskStateFailed,
+			Message: a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("agent failure")),
+		},
+	}
+	failedResult, _ := srv.handleBroadcastTaskResult(failedTask)
+	if failedResult.Status != "error" {
+		t.Errorf("expected status 'error' for failed task, got %q", failedResult.Status)
+	}
+	if failedResult.Task != nil {
+		t.Error("expected Task to be nil for failed broadcast result")
+	}
+	if failedResult.Message != nil {
+		t.Error("expected Message to be nil for failed broadcast result")
+	}
+
+	// Test canceled task: handleBroadcastTaskResult should set Status="error" with nil Task/Message.
+	canceledTask := &a2a.Task{
+		ID:     "task-cancel-broadcast",
+		Status: a2a.TaskStatus{State: a2a.TaskStateCanceled},
+	}
+	canceledResult, _ := srv.handleBroadcastTaskResult(canceledTask)
+	if canceledResult.Status != "error" {
+		t.Errorf("expected status 'error' for canceled task, got %q", canceledResult.Status)
+	}
+	if canceledResult.Task != nil {
+		t.Error("expected Task to be nil for canceled broadcast result")
+	}
+	if canceledResult.Message != nil {
+		t.Error("expected Message to be nil for canceled broadcast result")
+	}
+
+	// Contrast: completed task should have non-nil Task field.
+	completedTask := &a2a.Task{
+		ID:     "task-ok-broadcast",
+		Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+		Artifacts: []*a2a.Artifact{
+			{Parts: a2a.ContentParts{a2a.NewTextPart("success")}},
+		},
+	}
+	completedResult, _ := srv.handleBroadcastTaskResult(completedTask)
+	if completedResult.Status != "success" {
+		t.Errorf("expected status 'success' for completed task, got %q", completedResult.Status)
+	}
+	if completedResult.Task == nil {
+		t.Error("expected Task to be non-nil for successful broadcast result")
+	}
+	if completedResult.Task != completedTask {
+		t.Error("expected Task to be the same pointer as the input task")
 	}
 }

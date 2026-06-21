@@ -36,6 +36,8 @@ func renderPart(part *a2a.Part) (string, bool) {
 }
 
 // FormatMessageResponse formats an a2a.Message response as MCP content items.
+// The second return value is a *SendMessageResponse wrapping the message for
+// use as structured content.
 //
 // Behavior:
 //   - Renders all parts (Text, Data, URL, Raw) using renderPart, concatenated in order.
@@ -44,7 +46,8 @@ func renderPart(part *a2a.Part) (string, bool) {
 //     content item.
 //
 // Content ordering: [response text, context_id]
-func FormatMessageResponse(msg *a2a.Message) *mcp.CallToolResult {
+func FormatMessageResponse(msg *a2a.Message) (*mcp.CallToolResult, *SendMessageResponse) {
+	// Requirement: SRES-2.1, SRES-2.2 — return raw message as structured content
 	result := &mcp.CallToolResult{}
 
 	text := extractContentFromMessageParts(msg.Parts)
@@ -56,7 +59,7 @@ func FormatMessageResponse(msg *a2a.Message) *mcp.CallToolResult {
 		})
 	}
 
-	return result
+	return result, &SendMessageResponse{Message: msg}
 }
 
 // extractContentFromMessageParts renders all parts using renderPart and
@@ -74,7 +77,8 @@ func extractContentFromMessageParts(parts a2a.ContentParts) string {
 }
 
 // FormatInterruptedResponse formats a response for a task in an interrupted
-// state (e.g. input-required, auth-required). It includes:
+// state (e.g. input-required, auth-required). The second return value is a
+// *SendMessageResponse wrapping the task for use as structured content. It includes:
 //   - The agent's status message (explaining what input is needed), or
 //     artifact content if available.
 //   - A "state:<stateName>" indicator so callers can programmatically
@@ -83,7 +87,8 @@ func extractContentFromMessageParts(parts a2a.ContentParts) string {
 //   - The context_id for follow-up messages.
 //
 // Content ordering: [response text, state indicator, task_id, context_id]
-func FormatInterruptedResponse(task *a2a.Task, stateName string) *mcp.CallToolResult {
+func FormatInterruptedResponse(task *a2a.Task, stateName string) (*mcp.CallToolResult, *SendMessageResponse) {
+	// Requirement: SRES-3.1, SRES-3.2 — structured content for interrupted states
 	result := &mcp.CallToolResult{}
 
 	// Prefer status message text (agents typically explain what they need here).
@@ -119,18 +124,21 @@ func FormatInterruptedResponse(task *a2a.Task, stateName string) *mcp.CallToolRe
 		})
 	}
 
-	return result
+	return result, &SendMessageResponse{Task: task}
 }
 
 // FormatInputRequiredResponse formats a response for a task in the
 // input-required state. This is a convenience wrapper around
-// FormatInterruptedResponse.
-func FormatInputRequiredResponse(task *a2a.Task) *mcp.CallToolResult {
+// FormatInterruptedResponse. The second return value is a *SendMessageResponse
+// wrapping the task for use as structured content.
+func FormatInputRequiredResponse(task *a2a.Task) (*mcp.CallToolResult, *SendMessageResponse) {
+	// Requirement: SRES-3.1 — structured content for input-required state
 	return FormatInterruptedResponse(task, "input-required")
 }
 
 // FormatTaskResponse extracts content from an A2A Task and formats it
-// as MCP CallToolResult content items.
+// as MCP CallToolResult content items. The second return value is a
+// *SendMessageResponse wrapping the task for use as structured content.
 //
 // Behavior:
 //   - Renders all parts (Text, Data, URL, Raw) from artifacts using renderPart.
@@ -142,7 +150,8 @@ func FormatInputRequiredResponse(task *a2a.Task) *mcp.CallToolResult {
 //     prefixed with "context_id:".
 //
 // Content ordering: [response text, task_id, context_id]
-func FormatTaskResponse(task *a2a.Task) *mcp.CallToolResult {
+func FormatTaskResponse(task *a2a.Task) (*mcp.CallToolResult, *SendMessageResponse) {
+	// Requirement: SRES-1.1, SRES-1.3, SRES-6.3 — return raw task as structured content
 	result := &mcp.CallToolResult{}
 
 	text := extractContentFromArtifacts(task.Artifacts)
@@ -161,7 +170,7 @@ func FormatTaskResponse(task *a2a.Task) *mcp.CallToolResult {
 		})
 	}
 
-	return result
+	return result, &SendMessageResponse{Task: task}
 }
 
 // extractContentFromArtifacts renders all parts from all artifacts using renderPart.

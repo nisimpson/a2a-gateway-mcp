@@ -252,7 +252,7 @@ func TestFormatStreamTask_UnrecognizedState_ReturnsProtocolError(t *testing.T) {
 		Status: a2a.TaskStatus{State: a2a.TaskState("completed")}, // v0.x lowercase
 	}
 
-	result := srv.formatStreamTask(task)
+	result, _ := srv.formatStreamTask(task)
 	if !result.IsError {
 		t.Fatal("expected error result for unrecognized state in streaming path")
 	}

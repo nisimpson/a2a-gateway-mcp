@@ -139,7 +139,7 @@ func (s *Server) handleStreamingMessage(
 	resolved *ResolveResult,
 	agent string,
 	timeout time.Duration,
-) (*mcp.CallToolResult, error) {
+) (*mcp.CallToolResult, *SendMessageResponse, error) {
 	// Requirement: STRM-3.1, STRM-3.2, STRM-3.3 — enforce stream timeout.
 	var streamCtx context.Context
 	var cancel context.CancelFunc
@@ -186,7 +186,7 @@ func (s *Server) handleStreamingMessage(
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{&mcp.TextContent{Text: errMsg}},
-		}, nil
+		}, nil, nil
 	}
 
 	// Determine the context_id to store (from the final result).
@@ -194,23 +194,25 @@ func (s *Server) handleStreamingMessage(
 
 	// Handle the stream result based on terminal condition type.
 	var mcpResult *mcp.CallToolResult
+	var structured *SendMessageResponse
 
+	// Requirement: SRES-5.1, SRES-5.2, SRES-5.3 — streaming produces same structured content format
 	switch {
 	case result.task != nil:
 		// A full *a2a.Task event terminated the stream.
 		contextID = result.task.ContextID
-		mcpResult = s.formatStreamTask(result.task)
+		mcpResult, structured = s.formatStreamTask(result.task)
 
 	case result.message != nil:
 		// A *a2a.Message event terminated the stream.
 		contextID = result.message.ContextID
-		mcpResult = FormatMessageResponse(result.message)
+		mcpResult, structured = FormatMessageResponse(result.message)
 
 	case result.terminatedByStatus:
 		// A terminal TaskStatusUpdateEvent terminated the stream.
 		task := buildTaskFromState(result.state)
 		contextID = task.ContextID
-		mcpResult = s.formatStreamTask(task)
+		mcpResult, structured = s.formatStreamTask(task)
 	}
 
 	// Requirement: STRM-4.1, STRM-4.4 — store context_id for alias-based agents.
@@ -221,14 +223,14 @@ func (s *Server) handleStreamingMessage(
 		s.contextStore.Set(agent, contextID)
 	}
 
-	return mcpResult, nil
+	return mcpResult, structured, nil
 }
 
 // formatStreamTask applies the same task-state-based formatting as the
 // polling path: completed → FormatTaskResponse, input-required →
 // FormatInputRequiredResponse, auth-required → FormatInterruptedResponse,
-// failed/canceled/rejected → error result.
-func (s *Server) formatStreamTask(task *a2a.Task) *mcp.CallToolResult {
+// failed/canceled/rejected → error result with task as structured content.
+func (s *Server) formatStreamTask(task *a2a.Task) (*mcp.CallToolResult, *SendMessageResponse) {
 	switch task.Status.State {
 	case a2a.TaskStateCompleted:
 		return FormatTaskResponse(task)
@@ -250,25 +252,25 @@ func (s *Server) formatStreamTask(task *a2a.Task) *mcp.CallToolResult {
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{&mcp.TextContent{Text: failMsg}},
-		}
+		}, &SendMessageResponse{Task: task}
 
 	case a2a.TaskStateCanceled:
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{&mcp.TextContent{Text: "task was canceled by the agent"}},
-		}
+		}, &SendMessageResponse{Task: task}
 
 	case a2a.TaskStateRejected:
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{&mcp.TextContent{Text: "task was rejected by the agent"}},
-		}
+		}, &SendMessageResponse{Task: task}
 
 	default:
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("agent returned unrecognized task state %q — ensure the agent supports A2A protocol v1.0 or later", task.Status.State)}},
-		}
+		}, &SendMessageResponse{Task: task}
 	}
 }
 

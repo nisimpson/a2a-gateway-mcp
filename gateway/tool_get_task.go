@@ -49,13 +49,16 @@ func (s *Server) handleGetTask(ctx context.Context, _ *mcp.CallToolRequest, inpu
 	// Format response based on task state.
 	switch task.Status.State {
 	case a2a.TaskStateCompleted:
-		return FormatTaskResponse(task), nil, nil
+		result, _ := FormatTaskResponse(task)
+		return result, nil, nil
 
 	case a2a.TaskStateInputRequired:
-		return FormatInterruptedResponse(task, "input-required"), nil, nil
+		result, _ := FormatInterruptedResponse(task, "input-required")
+		return result, nil, nil
 
 	case a2a.TaskStateAuthRequired:
-		return FormatInterruptedResponse(task, "auth-required"), nil, nil
+		result, _ := FormatInterruptedResponse(task, "auth-required")
+		return result, nil, nil
 
 	case a2a.TaskStateFailed:
 		failMsg := "task failed"
@@ -78,6 +81,7 @@ func (s *Server) handleGetTask(ctx context.Context, _ *mcp.CallToolRequest, inpu
 
 	default:
 		// For non-terminal states (working, submitted), show current state.
-		return FormatTaskResponse(task), nil, nil
+		result, _ := FormatTaskResponse(task)
+		return result, nil, nil
 	}
 }

@@ -1,8 +1,21 @@
 package gateway
 
 import (
+	"reflect"
+
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// outputSchemaFor generates a JSON Schema from the given struct type using reflection.
+// It panics if the type cannot be converted to a schema (programming error).
+func outputSchemaFor[T any]() *jsonschema.Schema {
+	schema, err := jsonschema.ForType(reflect.TypeFor[T](), &jsonschema.ForOptions{})
+	if err != nil {
+		panic("outputSchemaFor: " + err.Error())
+	}
+	return schema
+}
 
 // ConnectAgentInput is the input schema for the connect_agent tool.
 type ConnectAgentInput struct {
@@ -128,23 +141,27 @@ type RemoveCallerCardInput struct{}
 // registerTools registers all MCP tools with the server.
 func (s *Server) registerTools() {
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "connect_agent",
-		Description: "Register a remote A2A agent with a friendly alias for subsequent operations",
+		Name:         "connect_agent",
+		Description:  "Register a remote A2A agent with a friendly alias for subsequent operations",
+		OutputSchema: outputSchemaFor[ConnectAgentOutput](),
 	}, s.handleConnectAgent)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "disconnect_agent",
-		Description: "Remove a registered agent by alias from the gateway registry",
+		Name:         "disconnect_agent",
+		Description:  "Remove a registered agent by alias from the gateway registry",
+		OutputSchema: outputSchemaFor[DisconnectAgentOutput](),
 	}, s.handleDisconnectAgent)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "list_agents",
-		Description: "List all currently connected agents with their aliases and URLs",
+		Name:         "list_agents",
+		Description:  "List all currently connected agents with their aliases and URLs",
+		OutputSchema: outputSchemaFor[ListAgentsOutput](),
 	}, s.handleListAgents)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "get_agent_card",
-		Description: "Retrieve the agent card from an A2A agent to discover its capabilities",
+		Name:         "get_agent_card",
+		Description:  "Retrieve the agent card from an A2A agent to discover its capabilities",
+		OutputSchema: outputSchemaFor[GetAgentCardOutput](),
 	}, s.handleGetAgentCard)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
@@ -152,16 +169,19 @@ func (s *Server) registerTools() {
 		Description: `Send a message to a connected A2A agent by alias or URL.
 
 Use 'message' for simple plain-text messages. Use 'parts' when you need to send structured data (JSON objects), URLs, or multi-part content. Parts also support base64-encoded binary data via the 'raw' field. If both are provided, 'parts' takes precedence.`,
+		OutputSchema: sendMessageOutputSchema(),
 	}, s.handleSendMessage)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "get_task",
-		Description: "Retrieve the current state of a previously initiated task from an A2A agent",
+		Name:         "get_task",
+		Description:  "Retrieve the current state of a previously initiated task from an A2A agent",
+		OutputSchema: outputSchemaFor[GetTaskOutput](),
 	}, s.handleGetTask)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "cancel_task",
-		Description: "Cancel a running task on an A2A agent",
+		Name:         "cancel_task",
+		Description:  "Cancel a running task on an A2A agent",
+		OutputSchema: outputSchemaFor[CancelTaskOutput](),
 	}, s.handleCancelTask)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
@@ -169,16 +189,19 @@ Use 'message' for simple plain-text messages. Use 'parts' when you need to send 
 		Description: `Send the same message to multiple agents simultaneously and collect responses.
 
 Use 'message' for simple plain-text broadcasts. Use 'parts' when you need to send structured data or mixed content to all agents. Parts also support base64-encoded binary data via the 'raw' field.`,
+		OutputSchema: broadcastMessageOutputSchema(),
 	}, s.handleBroadcastMessage)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "discover_agents",
-		Description: "Discover available agents from a remote agent directory service",
+		Name:         "discover_agents",
+		Description:  "Discover available agents from a remote agent directory service",
+		OutputSchema: outputSchemaFor[DiscoverAgentsOutput](),
 	}, s.handleDiscoverAgents)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "ping_agent",
-		Description: "Perform a liveness check on a registered agent to verify reachability",
+		Name:         "ping_agent",
+		Description:  "Perform a liveness check on a registered agent to verify reachability",
+		OutputSchema: outputSchemaFor[PingAgentOutput](),
 	}, s.handlePingAgent)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
@@ -186,29 +209,34 @@ Use 'message' for simple plain-text broadcasts. Use 'parts' when you need to sen
 		Description: `Register a caller agent card that is automatically included on all outbound messages (send_message and broadcast_message).
 
 Calling again replaces the previous card. This enables target agents to discover the caller's capabilities and delegate tasks back without requiring a .well-known/agent-card.json endpoint.`,
+		OutputSchema: outputSchemaFor[CreateCallerCardOutput](),
 	}, s.handleCreateCallerCard)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "view_caller_card",
-		Description: "View the currently registered caller agent card, if any",
+		Name:         "view_caller_card",
+		Description:  "View the currently registered caller agent card, if any",
+		OutputSchema: outputSchemaFor[ViewCallerCardOutput](),
 	}, s.handleViewCallerCard)
 
 	mcp.AddTool(s.mcpServer, &mcp.Tool{
-		Name:        "remove_caller_card",
-		Description: "Remove the registered caller agent card so it is no longer injected on outbound messages",
+		Name:         "remove_caller_card",
+		Description:  "Remove the registered caller agent card so it is no longer injected on outbound messages",
+		OutputSchema: outputSchemaFor[RemoveCallerCardOutput](),
 	}, s.handleRemoveCallerCard)
 
 	// Register history tools only when history is enabled (depth > 0).
 	// Requirements: 5.1, 5.2, 5.3
 	if s.historyEnabled {
 		mcp.AddTool(s.mcpServer, &mcp.Tool{
-			Name:        "get_history",
-			Description: "Retrieve the interaction history for a connected agent. Returns a chronological list of past interactions including sent messages and responses.",
+			Name:         "get_history",
+			Description:  "Retrieve the interaction history for a connected agent. Returns a chronological list of past interactions including sent messages and responses.",
+			OutputSchema: outputSchemaFor[GetHistoryOutput](),
 		}, s.handleGetHistory)
 
 		mcp.AddTool(s.mcpServer, &mcp.Tool{
-			Name:        "clear_history",
-			Description: "Clear all interaction history for a connected agent without disconnecting the agent.",
+			Name:         "clear_history",
+			Description:  "Clear all interaction history for a connected agent without disconnecting the agent.",
+			OutputSchema: outputSchemaFor[ClearHistoryOutput](),
 		}, s.handleClearHistory)
 	}
 }
