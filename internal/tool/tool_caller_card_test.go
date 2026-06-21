@@ -16,20 +16,22 @@ func TestCreateCallerCard_EmptyName(t *testing.T) {
 		Name:        "   ",
 		Description: "a description",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for whitespace-only name")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for whitespace-only name")
+	if result != nil {
+		t.Fatal("expected nil result for validation error")
 	}
-	assertTextContains(t, result, "name must not be empty")
+	if err.Error() != "name must not be empty or whitespace-only" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestCreateCallerCard_Success(t *testing.T) {
 	store := &mockCallerCardStore{}
 	tool := &CreateCallerCardTool{Store: store}
 
-	result, _, err := tool.Handle(context.Background(), nil, &CreateCallerCardInput{
+	result, out, err := tool.Handle(context.Background(), nil, &CreateCallerCardInput{
 		Name:        "My Agent",
 		Description: "Does cool things",
 		URL:         "http://localhost:8080",
@@ -37,8 +39,11 @@ func TestCreateCallerCard_Success(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatalf("unexpected result for success: %v", result)
+	}
+	if out == nil {
+		t.Fatal("expected structured output")
 	}
 	if store.card == nil {
 		t.Fatal("expected card to be stored")
@@ -49,7 +54,9 @@ func TestCreateCallerCard_Success(t *testing.T) {
 	if store.card.Description != "Does cool things" {
 		t.Errorf("expected description 'Does cool things', got %q", store.card.Description)
 	}
-	assertTextContains(t, result, "Caller agent card registered")
+	if out.Message == "" {
+		t.Fatal("expected message in output")
+	}
 }
 
 func TestViewCallerCard_NoCard(t *testing.T) {
@@ -60,7 +67,10 @@ func TestViewCallerCard_NoCard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
+	if result == nil {
+		t.Fatal("expected result for no card case")
+	}
+	if !result.IsError {
 		t.Fatal("unexpected error result")
 	}
 	assertTextContains(t, result, "no caller agent card is currently set")
@@ -79,6 +89,9 @@ func TestViewCallerCard_WithCard(t *testing.T) {
 	result, _, err := tool.Handle(context.Background(), nil, &ViewCallerCardInput{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if result == nil {
+		t.Fatal("expected result with card info")
 	}
 	if result.IsError {
 		t.Fatal("unexpected error result")
@@ -106,13 +119,15 @@ func TestRemoveCallerCard_NoCard(t *testing.T) {
 	tool := &RemoveCallerCardTool{Store: store}
 
 	result, _, err := tool.Handle(context.Background(), nil, &RemoveCallerCardInput{})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error when no card is set")
 	}
-	if result.IsError {
-		t.Fatal("unexpected error result")
+	if result != nil {
+		t.Fatalf("unexpected result: %v", result)
 	}
-	assertTextContains(t, result, "no caller agent card was set")
+	if err.Error() != "no caller agent card was set" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestRemoveCallerCard_Success(t *testing.T) {
@@ -121,15 +136,17 @@ func TestRemoveCallerCard_Success(t *testing.T) {
 	}
 	tool := &RemoveCallerCardTool{Store: store}
 
-	result, _, err := tool.Handle(context.Background(), nil, &RemoveCallerCardInput{})
+	result, out, err := tool.Handle(context.Background(), nil, &RemoveCallerCardInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatal("unexpected error result")
+	if result != nil {
+		t.Fatalf("unexpected result for success: %v", result)
+	}
+	if out == nil {
+		t.Fatal("expected structured output")
 	}
 	if store.card != nil {
 		t.Error("expected card to be nil after removal")
 	}
-	assertTextContains(t, result, "Caller agent card removed")
 }

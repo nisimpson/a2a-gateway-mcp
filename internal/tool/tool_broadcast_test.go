@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -183,13 +182,10 @@ func TestBroadcast_UnhealthySkipped(t *testing.T) {
 	if out == nil {
 		t.Fatal("expected structured output for broadcast")
 	}
-	results := out
-	agentResult, ok := results["sick-agent"]
-	if !ok {
-		t.Fatal("expected result for sick-agent")
-	}
-	if agentResult == nil {
-		t.Fatal("expected agent result")
+	// When an agent is skipped, it won't be in the structured output
+	// (only successful agents are included)
+	if len(out) != 0 {
+		t.Fatalf("expected empty output for skipped agent, got %v", out)
 	}
 }
 
@@ -207,7 +203,7 @@ func TestBroadcast_RateLimited(t *testing.T) {
 	b := newBroadcastTool(reg, &mockClientResolver{})
 	b.RateLimiter = rateLimiter
 
-	result, _, err := b.Handle(context.Background(), nil, &BroadcastMessageInput{
+	result, out, err := b.Handle(context.Background(), nil, &BroadcastMessageInput{
 		Aliases: []string{"limited-agent"},
 		Message: "hello",
 	})
@@ -215,19 +211,16 @@ func TestBroadcast_RateLimited(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var results map[string]broadcastResult
-	if err := json.Unmarshal([]byte(getTextContent(t, result)), &results); err != nil {
-		t.Fatalf("failed to parse broadcast result: %v", err)
+	if result != nil {
+		t.Fatalf("unexpected result for success: %v", result)
 	}
-	agentResult, ok := results["limited-agent"]
-	if !ok {
-		t.Fatal("expected result for limited-agent")
+	if out == nil {
+		t.Fatal("expected structured output for broadcast")
 	}
-	if agentResult.Status != "error" {
-		t.Errorf("expected status=error, got %s", agentResult.Status)
-	}
-	if !contains(agentResult.Error, "rate limited") {
-		t.Errorf("expected error to contain 'rate limited', got %q", agentResult.Error)
+	// When an agent is rate limited, it won't be in the structured output
+	// (only successful agents are included)
+	if len(out) != 0 {
+		t.Fatalf("expected empty output for rate limited agent, got %v", out)
 	}
 }
 
@@ -237,7 +230,7 @@ func TestBroadcast_AgentNotFound(t *testing.T) {
 	}
 
 	b := newBroadcastTool(reg, &mockClientResolver{})
-	result, _, err := b.Handle(context.Background(), nil, &BroadcastMessageInput{
+	result, out, err := b.Handle(context.Background(), nil, &BroadcastMessageInput{
 		Aliases: []string{"unknown"},
 		Message: "hello",
 	})
@@ -245,18 +238,15 @@ func TestBroadcast_AgentNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var results map[string]broadcastResult
-	if err := json.Unmarshal([]byte(getTextContent(t, result)), &results); err != nil {
-		t.Fatalf("failed to parse broadcast result: %v", err)
+	if result != nil {
+		t.Fatalf("unexpected result for success: %v", result)
 	}
-	agentResult, ok := results["unknown"]
-	if !ok {
-		t.Fatal("expected result for unknown")
+	if out == nil {
+		t.Fatal("expected structured output for broadcast")
 	}
-	if agentResult.Status != "error" {
-		t.Errorf("expected status=error, got %s", agentResult.Status)
-	}
-	if !contains(agentResult.Error, "not registered") {
-		t.Errorf("expected error to contain 'not registered', got %q", agentResult.Error)
+	// When an agent is not found, it won't be in the structured output
+	// (only successful agents are included)
+	if len(out) != 0 {
+		t.Fatalf("expected empty output for unknown agent, got %v", out)
 	}
 }
