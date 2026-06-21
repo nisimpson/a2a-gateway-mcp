@@ -2,10 +2,7 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func newListTool() (*ListAgentsTool, *mockRegistry, *mockRateLimiter, *mockHealthTracker) {
@@ -26,20 +23,18 @@ func TestList_Empty(t *testing.T) {
 	tool, reg, _, _ := newListTool()
 	reg.ListFn = func() []*AgentEntry { return nil }
 
-	result, _, err := tool.Handle(context.Background(), nil, &ListAgentsInput{})
+	result, output, err := tool.Handle(context.Background(), nil, &ListAgentsInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
 	}
-
-	tc, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	if output == nil {
+		t.Fatal("expected non-nil output")
 	}
-	if tc.Text != "[]" {
-		t.Errorf("expected empty JSON array '[]', got %q", tc.Text)
+	if len(output.Agents) != 0 {
+		t.Errorf("expected empty agents list, got %d", len(output.Agents))
 	}
 }
 
@@ -63,37 +58,30 @@ func TestList_WithAgents(t *testing.T) {
 	ht.GetStatusFn = func(alias string) string { return "healthy" }
 	ht.GetFailuresFn = func(alias string) (int, bool) { return 0, false }
 
-	result, _, err := tool.Handle(context.Background(), nil, &ListAgentsInput{})
+	result, output, err := tool.Handle(context.Background(), nil, &ListAgentsInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
 	}
-
-	tc, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	if output == nil {
+		t.Fatal("expected non-nil output")
 	}
-
-	var entries []ListAgentEntry
-	if err := json.Unmarshal([]byte(tc.Text), &entries); err != nil {
-		t.Fatalf("failed to unmarshal list response: %v", err)
+	if len(output.Agents) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(output.Agents))
 	}
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
+	if output.Agents[0].Alias != "agent-one" {
+		t.Errorf("expected alias 'agent-one', got %q", output.Agents[0].Alias)
 	}
-	if entries[0].Alias != "agent-one" {
-		t.Errorf("expected alias 'agent-one', got %q", entries[0].Alias)
+	if output.Agents[0].RateLimit != "5.00 rps, burst 10" {
+		t.Errorf("expected rate limit '5.00 rps, burst 10', got %q", output.Agents[0].RateLimit)
 	}
-	if entries[0].RateLimit != "5.00 rps, burst 10" {
-		t.Errorf("expected rate limit '5.00 rps, burst 10', got %q", entries[0].RateLimit)
+	if output.Agents[1].RateLimit != "unlimited" {
+		t.Errorf("expected 'unlimited' for agent-two, got %q", output.Agents[1].RateLimit)
 	}
-	if entries[1].RateLimit != "unlimited" {
-		t.Errorf("expected 'unlimited' for agent-two, got %q", entries[1].RateLimit)
-	}
-	if entries[0].Health != "healthy" {
-		t.Errorf("expected health 'healthy', got %q", entries[0].Health)
+	if output.Agents[0].Health != "healthy" {
+		t.Errorf("expected health 'healthy', got %q", output.Agents[0].Health)
 	}
 }
 
@@ -110,33 +98,26 @@ func TestList_UnhealthyShowsFailures(t *testing.T) {
 	ht.GetStatusFn = func(alias string) string { return "unhealthy" }
 	ht.GetFailuresFn = func(alias string) (int, bool) { return 5, true }
 
-	result, _, err := tool.Handle(context.Background(), nil, &ListAgentsInput{})
+	result, output, err := tool.Handle(context.Background(), nil, &ListAgentsInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
 	}
-
-	tc, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	if output == nil {
+		t.Fatal("expected non-nil output")
 	}
-
-	var entries []ListAgentEntry
-	if err := json.Unmarshal([]byte(tc.Text), &entries); err != nil {
-		t.Fatalf("failed to unmarshal list response: %v", err)
+	if len(output.Agents) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(output.Agents))
 	}
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
+	if output.Agents[0].Health != "unhealthy" {
+		t.Errorf("expected health 'unhealthy', got %q", output.Agents[0].Health)
 	}
-	if entries[0].Health != "unhealthy" {
-		t.Errorf("expected health 'unhealthy', got %q", entries[0].Health)
-	}
-	if entries[0].ConsecutiveFailures == nil {
+	if output.Agents[0].ConsecutiveFailures == nil {
 		t.Fatal("expected consecutive_failures to be set")
 	}
-	if *entries[0].ConsecutiveFailures != 5 {
-		t.Errorf("expected 5 consecutive failures, got %d", *entries[0].ConsecutiveFailures)
+	if *output.Agents[0].ConsecutiveFailures != 5 {
+		t.Errorf("expected 5 consecutive failures, got %d", *output.Agents[0].ConsecutiveFailures)
 	}
 }

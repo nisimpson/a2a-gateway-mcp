@@ -26,32 +26,36 @@ func newConnectTool() (*ConnectAgentTool, *mockRegistry, *mockClientResolver, *m
 
 func TestConnect_InvalidAlias(t *testing.T) {
 	tool, _, _, _, _, _ := newConnectTool()
-	result, _, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
+	result, output, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
 		Alias:    "",
 		AgentURL: "http://example.com",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for empty alias")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for empty alias")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for validation error")
 	}
-	assertTextContains(t, result, "alias is required")
+	if err.Error() != "alias is required and cannot be empty" {
+		t.Fatalf("expected 'alias is required and cannot be empty', got %v", err)
+	}
 }
 
 func TestConnect_InvalidURL(t *testing.T) {
 	tool, _, _, _, _, _ := newConnectTool()
-	result, _, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
+	result, output, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
 		Alias:    "my-agent",
 		AgentURL: "ftp://example.com",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for bad URL scheme")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for bad URL scheme")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for validation error")
 	}
-	assertTextContains(t, result, "http or https")
+	if err.Error() != "URL must have http or https scheme, got \"ftp\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
 }
 
 func TestConnect_Success(t *testing.T) {
@@ -78,15 +82,21 @@ func TestConnect_Success(t *testing.T) {
 		resetCalled = true
 	}
 
-	result, _, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
+	result, output, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
 		Alias:    "my-agent",
 		AgentURL: "http://example.com",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatal("expected success result")
+	if result != nil {
+		t.Fatal("expected nil result for success")
+	}
+	if output == nil {
+		t.Fatal("expected non-nil output for success")
+	}
+	if output.Message == "" {
+		t.Fatal("expected non-empty success message")
 	}
 	if !connectCalled {
 		t.Error("expected Connect to be called")
@@ -97,7 +107,6 @@ func TestConnect_Success(t *testing.T) {
 	if !resetCalled {
 		t.Error("expected HealthTracker.Reset to be called")
 	}
-	assertTextContains(t, result, "Connected agent")
 }
 
 func TestConnect_ReplacesExisting(t *testing.T) {
@@ -123,15 +132,18 @@ func TestConnect_ReplacesExisting(t *testing.T) {
 	// Pre-seed context store.
 	tool.ContextStore.Set("my-agent", "old-ctx")
 
-	result, _, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
+	result, output, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
 		Alias:    "my-agent",
 		AgentURL: "http://new.com",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
+	}
+	if output == nil {
+		t.Fatal("expected non-nil output for success")
 	}
 	if !evictCalled {
 		t.Error("expected Evict to be called for old URL")
@@ -160,7 +172,7 @@ func TestConnect_RateLimitConfigured(t *testing.T) {
 
 	rps := 5.0
 	burst := 10
-	result, _, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
+	result, output, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
 		Alias:          "my-agent",
 		AgentURL:       "http://example.com",
 		RateLimitRPS:   &rps,
@@ -169,8 +181,11 @@ func TestConnect_RateLimitConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
+	}
+	if output == nil {
+		t.Fatal("expected non-nil output for success")
 	}
 	if setAlias != "my-agent" {
 		t.Errorf("expected Set called with alias 'my-agent', got %q", setAlias)
@@ -201,15 +216,18 @@ func TestConnect_DefaultRateLimitApplied(t *testing.T) {
 		setBurst = burst
 	}
 
-	result, _, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
+	result, output, err := tool.Handle(context.Background(), nil, &ConnectAgentInput{
 		Alias:    "my-agent",
 		AgentURL: "http://example.com",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
+	}
+	if output == nil {
+		t.Fatal("expected non-nil output for success")
 	}
 	if setAlias != "my-agent" {
 		t.Errorf("expected Set called with alias 'my-agent', got %q", setAlias)

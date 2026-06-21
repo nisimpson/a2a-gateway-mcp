@@ -87,7 +87,7 @@ func TestCancelTask_Success(t *testing.T) {
 func TestCancelTask_NotCancelable(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req, _ := readJSONRPCRequest(r)
-		// Return a JSON-RPC error.
+		// Return a JSON-RPC error for non-cancelable task
 		resp := map[string]any{
 			"jsonrpc": "2.0",
 			"id":      req.ID,
@@ -113,15 +113,20 @@ func TestCancelTask_NotCancelable(t *testing.T) {
 	}
 
 	c := newCancelTaskTool(reg, clientResolver)
-	result, _, err := c.Handle(context.Background(), nil, &CancelTaskInput{
+	result, out, err := c.Handle(context.Background(), nil, &CancelTaskInput{
 		Agent:  "test-agent",
 		TaskID: "task-xyz",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for non-cancelable task")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for non-cancelable task")
+	if result != nil {
+		t.Fatalf("unexpected result: %v", result)
 	}
-	assertTextContains(t, result, "not cancelable")
+	if out != nil {
+		t.Fatalf("unexpected output: %v", out)
+	}
+	if err.Error() != "task is not cancelable" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }

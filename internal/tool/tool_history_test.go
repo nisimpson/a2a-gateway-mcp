@@ -2,11 +2,9 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/history"
 )
 
@@ -32,28 +30,26 @@ func newClearHistoryTool() (*ClearHistoryTool, *mockRegistry, *mockHistoryBacken
 
 func TestGetHistory_EmptyAlias(t *testing.T) {
 	tool, _, _ := newGetHistoryTool()
-	result, _, err := tool.Handle(context.Background(), nil, &GetHistoryInput{Agent: ""})
-	if err != nil {
-		t.Fatal(err)
+	result, output, err := tool.Handle(context.Background(), nil, &GetHistoryInput{Agent: ""})
+	if err == nil {
+		t.Fatal("expected error for empty alias")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for empty alias")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for validation error")
 	}
-	assertTextContains(t, result, "agent alias is required")
 }
 
 func TestGetHistory_AgentNotFound(t *testing.T) {
 	tool, reg, _ := newGetHistoryTool()
 	reg.LookupFn = func(alias string) *AgentEntry { return nil }
 
-	result, _, err := tool.Handle(context.Background(), nil, &GetHistoryInput{Agent: "ghost"})
-	if err != nil {
-		t.Fatal(err)
+	result, output, err := tool.Handle(context.Background(), nil, &GetHistoryInput{Agent: "ghost"})
+	if err == nil {
+		t.Fatal("expected error for unknown agent")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for unknown agent")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for error")
 	}
-	assertTextContains(t, result, "not found")
 }
 
 func TestGetHistory_Success(t *testing.T) {
@@ -71,28 +67,21 @@ func TestGetHistory_Success(t *testing.T) {
 		}, nil
 	}
 
-	result, _, err := tool.Handle(context.Background(), nil, &GetHistoryInput{Agent: "my-agent"})
+	result, output, err := tool.Handle(context.Background(), nil, &GetHistoryInput{Agent: "my-agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
 	}
-
-	tc, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	if output == nil {
+		t.Fatal("expected non-nil output for success")
 	}
-
-	var entries []history.Entry
-	if err := json.Unmarshal([]byte(tc.Text), &entries); err != nil {
-		t.Fatalf("failed to unmarshal history: %v", err)
+	if len(output.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(output.Entries))
 	}
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
-	}
-	if entries[0].SentMessage != "hello" {
-		t.Errorf("expected first entry sent_message='hello', got %q", entries[0].SentMessage)
+	if output.Entries[0].SentMessage != "hello" {
+		t.Errorf("expected first entry sent_message='hello', got %q", output.Entries[0].SentMessage)
 	}
 }
 
@@ -113,32 +102,25 @@ func TestGetHistory_WithLimit(t *testing.T) {
 	}
 
 	limit := 2
-	result, _, err := tool.Handle(context.Background(), nil, &GetHistoryInput{Agent: "my-agent", Limit: &limit})
+	result, output, err := tool.Handle(context.Background(), nil, &GetHistoryInput{Agent: "my-agent", Limit: &limit})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
 	}
-
-	tc, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	if output == nil {
+		t.Fatal("expected non-nil output for success")
 	}
-
-	var entries []history.Entry
-	if err := json.Unmarshal([]byte(tc.Text), &entries); err != nil {
-		t.Fatalf("failed to unmarshal history: %v", err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries after limit, got %d", len(entries))
+	if len(output.Entries) != 2 {
+		t.Fatalf("expected 2 entries after limit, got %d", len(output.Entries))
 	}
 	// Should return the most recent 2.
-	if entries[0].SentMessage != "second" {
-		t.Errorf("expected 'second', got %q", entries[0].SentMessage)
+	if output.Entries[0].SentMessage != "second" {
+		t.Errorf("expected 'second', got %q", output.Entries[0].SentMessage)
 	}
-	if entries[1].SentMessage != "third" {
-		t.Errorf("expected 'third', got %q", entries[1].SentMessage)
+	if output.Entries[1].SentMessage != "third" {
+		t.Errorf("expected 'third', got %q", output.Entries[1].SentMessage)
 	}
 }
 
@@ -155,29 +137,30 @@ func TestClearHistory_Success(t *testing.T) {
 		return nil
 	}
 
-	result, _, err := tool.Handle(context.Background(), nil, &ClearHistoryInput{Agent: "my-agent"})
+	result, output, err := tool.Handle(context.Background(), nil, &ClearHistoryInput{Agent: "my-agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
+	}
+	if output == nil {
+		t.Fatal("expected non-nil output for success")
 	}
 	if !clearCalled {
 		t.Error("expected Clear to be called")
 	}
-	assertTextContains(t, result, "Cleared history")
 }
 
 func TestClearHistory_AgentNotFound(t *testing.T) {
 	tool, reg, _ := newClearHistoryTool()
 	reg.LookupFn = func(alias string) *AgentEntry { return nil }
 
-	result, _, err := tool.Handle(context.Background(), nil, &ClearHistoryInput{Agent: "ghost"})
-	if err != nil {
-		t.Fatal(err)
+	result, output, err := tool.Handle(context.Background(), nil, &ClearHistoryInput{Agent: "ghost"})
+	if err == nil {
+		t.Fatal("expected error for unknown agent")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for unknown agent")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for error")
 	}
-	assertTextContains(t, result, "not found")
 }

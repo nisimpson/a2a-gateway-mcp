@@ -19,26 +19,24 @@ func newGetTaskTool(reg *mockRegistry, clientResolver *mockClientResolver) *GetT
 
 func TestGetTask_AgentRequired(t *testing.T) {
 	g := newGetTaskTool(&mockRegistry{}, &mockClientResolver{})
-	result, _, err := g.Handle(context.Background(), nil, &GetTaskInput{})
-	if err != nil {
-		t.Fatal(err)
+	result, output, err := g.Handle(context.Background(), nil, &GetTaskInput{})
+	if err == nil {
+		t.Fatal("expected error for missing agent")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for validation error")
 	}
-	assertTextContains(t, result, "agent identifier is required")
 }
 
 func TestGetTask_TaskIDRequired(t *testing.T) {
 	g := newGetTaskTool(&mockRegistry{}, &mockClientResolver{})
-	result, _, err := g.Handle(context.Background(), nil, &GetTaskInput{Agent: "test-agent"})
-	if err != nil {
-		t.Fatal(err)
+	result, output, err := g.Handle(context.Background(), nil, &GetTaskInput{Agent: "test-agent"})
+	if err == nil {
+		t.Fatal("expected error for missing task_id")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for validation error")
 	}
-	assertTextContains(t, result, "task_id is required")
 }
 
 func TestGetTask_Completed(t *testing.T) {

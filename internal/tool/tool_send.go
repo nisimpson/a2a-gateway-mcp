@@ -242,13 +242,14 @@ func (s *SendMessageTool) recordHealthOutcome(resolved *ResolveResult, err error
 
 // recordHistory records an interaction to the history backend.
 func (s *SendMessageTool) recordHistory(ctx context.Context, input *SendMessageInput, result *mcp.CallToolResult, structured *SendMessageOutput) {
+	isError := result != nil && result.IsError
 	s.HistoryRecorder.Record(ctx, history.RecordInput{
 		Alias:     input.Agent,
 		Sent:      summarizeMessage(input.Message, input.Parts),
 		Response:  extractResultText(result),
 		ContextID: extractResponseContextID(structured),
 		TaskID:    extractResponseTaskID(structured),
-		IsError:   result.IsError,
+		IsError:   isError,
 	})
 }
 

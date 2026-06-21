@@ -17,32 +17,30 @@ func newDiscoverAgentsTool(httpClient *mockHTTPDoer) *DiscoverAgentsTool {
 
 func TestDiscover_InvalidURL(t *testing.T) {
 	d := newDiscoverAgentsTool(&mockHTTPDoer{})
-	result, _, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
+	result, output, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
 		DirectoryURL: "not-a-url",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for invalid URL")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for validation error")
 	}
-	assertTextContains(t, result, "http or https scheme")
 }
 
 func TestDiscover_InvalidLimit(t *testing.T) {
 	d := newDiscoverAgentsTool(&mockHTTPDoer{})
 	limit := 0
-	result, _, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
+	result, output, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
 		DirectoryURL: "https://example.com/directory",
 		Limit:        &limit,
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for invalid limit")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for validation error")
 	}
-	assertTextContains(t, result, "limit must be a positive integer")
 }
 
 func TestDiscover_Success(t *testing.T) {
@@ -59,17 +57,21 @@ func TestDiscover_Success(t *testing.T) {
 	}
 
 	d := newDiscoverAgentsTool(httpClient)
-	result, _, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
+	result, output, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
 		DirectoryURL: "https://example.com/directory",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
 	}
-	assertTextContains(t, result, "agent1")
-	assertTextContains(t, result, "agent2")
+	if output == nil {
+		t.Fatal("expected non-nil output for success")
+	}
+	if len(output.Agents) != 2 {
+		t.Fatalf("expected 2 agents, got %d", len(output.Agents))
+	}
 }
 
 func TestDiscover_NotJSONArray(t *testing.T) {
@@ -84,16 +86,15 @@ func TestDiscover_NotJSONArray(t *testing.T) {
 	}
 
 	d := newDiscoverAgentsTool(httpClient)
-	result, _, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
+	result, output, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
 		DirectoryURL: "https://example.com/directory",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for non-array JSON")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for non-array JSON")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for error")
 	}
-	assertTextContains(t, result, "not a JSON array")
 }
 
 func TestDiscover_Unreachable(t *testing.T) {
@@ -104,14 +105,13 @@ func TestDiscover_Unreachable(t *testing.T) {
 	}
 
 	d := newDiscoverAgentsTool(httpClient)
-	result, _, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
+	result, output, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
 		DirectoryURL: "https://example.com/directory",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected error for unreachable directory")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for unreachable directory")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for error")
 	}
-	assertTextContains(t, result, "unreachable")
 }

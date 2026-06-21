@@ -18,14 +18,19 @@ func newGetAgentCardTool(reg *mockRegistry, httpClient *mockHTTPDoer) *GetAgentC
 
 func TestGetAgentCard_EmptyAgent(t *testing.T) {
 	g := newGetAgentCardTool(&mockRegistry{}, &mockHTTPDoer{})
-	result, _, err := g.Handle(context.Background(), nil, &GetAgentCardInput{Agent: ""})
-	if err != nil {
-		t.Fatal(err)
+	result, out, err := g.Handle(context.Background(), nil, &GetAgentCardInput{Agent: ""})
+	if err == nil {
+		t.Fatal("expected error for empty agent")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatalf("unexpected result: %v", result)
 	}
-	assertTextContains(t, result, "agent identifier is required")
+	if out != nil {
+		t.Fatalf("unexpected output: %v", out)
+	}
+	if err.Error() != "agent identifier is required and cannot be empty" {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestGetAgentCard_AgentUnreachable(t *testing.T) {
@@ -41,14 +46,19 @@ func TestGetAgentCard_AgentUnreachable(t *testing.T) {
 	}
 
 	g := newGetAgentCardTool(reg, httpClient)
-	result, _, err := g.Handle(context.Background(), nil, &GetAgentCardInput{Agent: "http://unreachable.invalid"})
-	if err != nil {
-		t.Fatal(err)
+	result, out, err := g.Handle(context.Background(), nil, &GetAgentCardInput{Agent: "http://unreachable.invalid"})
+	if err == nil {
+		t.Fatal("expected error for unreachable agent")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result")
+	if result != nil {
+		t.Fatalf("unexpected result: %v", result)
 	}
-	assertTextContains(t, result, "agent unreachable")
+	if out != nil {
+		t.Fatalf("unexpected output: %v", out)
+	}
+	if !contains(err.Error(), "agent unreachable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestGetAgentCard_Success(t *testing.T) {
@@ -70,14 +80,19 @@ func TestGetAgentCard_Success(t *testing.T) {
 	}
 
 	g := newGetAgentCardTool(reg, httpClient)
-	result, _, err := g.Handle(context.Background(), nil, &GetAgentCardInput{Agent: "test-agent"})
+	result, out, err := g.Handle(context.Background(), nil, &GetAgentCardInput{Agent: "test-agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatalf("unexpected result for success: %v", result)
 	}
-	assertTextContains(t, result, `"name":"test-agent"`)
+	if out == nil {
+		t.Fatal("expected structured output")
+	}
+	if out.Name != "test-agent" {
+		t.Errorf("expected name 'test-agent', got %q", out.Name)
+	}
 }
 
 func TestGetAgentCard_InvalidJSON(t *testing.T) {
@@ -97,12 +112,17 @@ func TestGetAgentCard_InvalidJSON(t *testing.T) {
 	}
 
 	g := newGetAgentCardTool(reg, httpClient)
-	result, _, err := g.Handle(context.Background(), nil, &GetAgentCardInput{Agent: "http://example.com"})
-	if err != nil {
-		t.Fatal(err)
+	result, out, err := g.Handle(context.Background(), nil, &GetAgentCardInput{Agent: "http://example.com"})
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for invalid JSON")
+	if result != nil {
+		t.Fatalf("unexpected result: %v", result)
 	}
-	assertTextContains(t, result, "failed to parse agent card JSON")
+	if out != nil {
+		t.Fatalf("unexpected output: %v", out)
+	}
+	if !contains(err.Error(), "failed to parse agent card JSON") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }

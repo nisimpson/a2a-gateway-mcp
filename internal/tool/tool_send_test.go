@@ -242,7 +242,9 @@ func TestSendMessage_DirectPath_TaskFailed(t *testing.T) {
 	if out.Task == nil {
 		t.Fatal("expected Task in structured output for failed state")
 	}
-	assertTextContains(t, result, "something broke")
+	if err.Error() != "something broke" {
+		t.Errorf("expected error message 'something broke', got %s", err.Error())
+	}
 }
 
 func TestSendMessage_ContextStoreUsed(t *testing.T) {

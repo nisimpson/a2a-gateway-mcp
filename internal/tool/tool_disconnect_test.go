@@ -24,14 +24,16 @@ func newDisconnectTool() (*DisconnectAgentTool, *mockRegistry, *mockClientResolv
 
 func TestDisconnect_InvalidAlias(t *testing.T) {
 	tool, _, _, _, _, _ := newDisconnectTool()
-	result, _, err := tool.Handle(context.Background(), nil, &DisconnectAgentInput{Alias: ""})
-	if err != nil {
-		t.Fatal(err)
+	result, output, err := tool.Handle(context.Background(), nil, &DisconnectAgentInput{Alias: ""})
+	if err == nil {
+		t.Fatal("expected error for empty alias")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for empty alias")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for validation error")
 	}
-	assertTextContains(t, result, "alias is required")
+	if err.Error() != "alias is required and cannot be empty" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
 }
 
 func TestDisconnect_NotFound(t *testing.T) {
@@ -39,14 +41,16 @@ func TestDisconnect_NotFound(t *testing.T) {
 	reg.DisconnectFn = func(alias string) *AgentEntry {
 		return nil
 	}
-	result, _, err := tool.Handle(context.Background(), nil, &DisconnectAgentInput{Alias: "ghost"})
-	if err != nil {
-		t.Fatal(err)
+	result, output, err := tool.Handle(context.Background(), nil, &DisconnectAgentInput{Alias: "ghost"})
+	if err == nil {
+		t.Fatal("expected error for unknown alias")
 	}
-	if !result.IsError {
-		t.Fatal("expected error result for unknown alias")
+	if result != nil || output != nil {
+		t.Fatal("expected nil result and output for operational error")
 	}
-	assertTextContains(t, result, "not found")
+	if err.Error() != "agent \"ghost\" not found in registry" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
 }
 
 func TestDisconnect_Success(t *testing.T) {
@@ -83,12 +87,15 @@ func TestDisconnect_Success(t *testing.T) {
 	}
 	tool.HistoryBackend = hb
 
-	result, _, err := tool.Handle(context.Background(), nil, &DisconnectAgentInput{Alias: "my-agent"})
+	result, output, err := tool.Handle(context.Background(), nil, &DisconnectAgentInput{Alias: "my-agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
+	}
+	if output == nil {
+		t.Fatal("expected non-nil output for success")
 	}
 	if !evictCalled {
 		t.Error("expected Evict to be called")
@@ -105,7 +112,6 @@ func TestDisconnect_Success(t *testing.T) {
 	if !historyDeleteCalled {
 		t.Error("expected HistoryBackend.Delete to be called")
 	}
-	assertTextContains(t, result, "Disconnected agent")
 }
 
 func TestDisconnect_NoHistory(t *testing.T) {
@@ -118,12 +124,14 @@ func TestDisconnect_NoHistory(t *testing.T) {
 	// HistoryBackend is nil — should not panic.
 	tool.HistoryBackend = nil
 
-	result, _, err := tool.Handle(context.Background(), nil, &DisconnectAgentInput{Alias: "my-agent"})
+	result, output, err := tool.Handle(context.Background(), nil, &DisconnectAgentInput{Alias: "my-agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %v", result.Content)
+	if result != nil {
+		t.Fatal("expected nil result for success")
 	}
-	assertTextContains(t, result, "Disconnected agent")
+	if output == nil {
+		t.Fatal("expected non-nil output for success")
+	}
 }
