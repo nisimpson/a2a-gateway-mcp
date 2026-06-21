@@ -3,16 +3,20 @@ package gateway
 import (
 	"context"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/health"
+	"github.com/nisimpson/a2a-gateway-mcp/history"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
 const (
 	defaultServerName    = "a2a-gateway-mcp"
 	defaultServerVersion = "0.1.0"
 	defaultHTTPTimeout   = 30 * time.Second
+	taskPollTimeout      = 60 * time.Second
+	defaultStreamTimeout = 60 * time.Second
 )
 
 // HealthCheckOptions configures the health tracking subsystem.
@@ -24,7 +28,7 @@ type HealthCheckOptions struct {
 	// PingStrategy is the strategy used for on-demand liveness checks via
 	// the ping_agent tool. If nil, DefaultPingStrategy (HTTP GET to agent
 	// card endpoint) is used.
-	PingStrategy PingStrategy
+	PingStrategy health.PingStrategy
 }
 
 // HistoryOptions configures the history subsystem. Pass to WithHistory().
@@ -40,7 +44,7 @@ type HistoryOptions struct {
 
 	// Backend is the storage implementation (default: in-memory).
 	// Must be safe for concurrent use.
-	Backend HistoryBackend
+	Backend history.Backend
 }
 
 // Option configures the Gateway server at initialization time.
@@ -59,13 +63,13 @@ type serverConfig struct {
 	// Health check configuration
 	healthCheckConfigured  bool // true when WithHealthCheck was called
 	healthFailureThreshold int
-	healthPingStrategy     PingStrategy
+	healthPingStrategy     health.PingStrategy
 
 	// History configuration
 	historyConfigured bool // true when WithHistory was called
 	historyDepth      int
 	historyMaxEntry   int
-	historyBackend    HistoryBackend
+	historyBackend    history.Backend
 }
 
 // WithHTTPClient sets a custom http.Client for all outbound A2A requests.
@@ -143,31 +147,29 @@ func WithHealthCheck(opts HealthCheckOptions) Option {
 // the agent registry and context store.
 type Server struct {
 	mcpServer     *mcp.Server
-	registry      *AgentRegistry
-	contextStore  *ContextStore
+	registry      *registry.AgentRegistry
+	contextStore  *registry.ContextStore
 	httpClient    *http.Client
-	clients       *clientResolver
+	clients       *registry.ClientResolver
 	pollTimeout   time.Duration
 	streamTimeout time.Duration
 
 	// Rate limiting — Requirement: RLIM-3.1
-	rateLimiters     *RateLimiterRegistry
-	defaultRateLimit *RateLimitConfig // nil means no global default (unlimited)
+	rateLimiters     *registry.RateLimiterRegistry
+	defaultRateLimit *registry.RateLimitConfig // nil means no global default (unlimited)
 
 	// Requirement: CAC-1.9 — global caller card state
-	callerCard    *CallerCard // nil when no card is registered
-	callerCardKey string      // metadata key; empty means use default
-	callerCardMu  sync.RWMutex
+	callerCardStore *registry.CallerCardStore
 
 	// History subsystem — Requirements: 1.3, 6.3
-	historyBackend HistoryBackend
+	historyBackend history.Backend
 	historyEnabled bool
 	historyDepth   int
 	maxEntryLength int
 
 	// Health tracking — Requirements: HLTH-4.1, HLTH-4.2, HLTH-4.3, HLTH-4.4, HLTH-4.5
-	healthTracker *HealthTracker
-	pingStrategy  PingStrategy
+	healthTracker *health.HealthTracker
+	pingStrategy  health.PingStrategy
 }
 
 // NewServer creates a new gateway server with the given options.
@@ -190,18 +192,19 @@ func NewServer(opts ...Option) *Server {
 	}, nil)
 
 	s := &Server{
-		mcpServer:     mcpServer,
-		registry:      NewAgentRegistry(),
-		contextStore:  NewContextStore(),
-		httpClient:    cfg.httpClient,
-		pollTimeout:   cfg.pollTimeout,
-		streamTimeout: cfg.streamTimeout,
-		rateLimiters:  NewRateLimiterRegistry(),
+		mcpServer:       mcpServer,
+		registry:        registry.NewAgentRegistry(),
+		contextStore:    registry.NewContextStore(),
+		callerCardStore: registry.NewCallerCardStore(),
+		httpClient:      cfg.httpClient,
+		pollTimeout:     cfg.pollTimeout,
+		streamTimeout:   cfg.streamTimeout,
+		rateLimiters:    registry.NewRateLimiterRegistry(),
 	}
 
 	// Set global default rate limit if both RPS and burst are positive.
 	if cfg.rateLimitRPS > 0 && cfg.rateLimitBurst > 0 {
-		s.defaultRateLimit = &RateLimitConfig{
+		s.defaultRateLimit = &registry.RateLimitConfig{
 			RequestsPerSecond: cfg.rateLimitRPS,
 			Burst:             cfg.rateLimitBurst,
 		}
@@ -224,7 +227,7 @@ func NewServer(opts ...Option) *Server {
 			}
 			backend := cfg.historyBackend
 			if backend == nil {
-				backend = NewMemoryBackend(depth)
+				backend = history.NewMemoryBackend(depth)
 			}
 			s.historyEnabled = true
 			s.historyDepth = depth
@@ -236,27 +239,27 @@ func NewServer(opts ...Option) *Server {
 		s.historyEnabled = true
 		s.historyDepth = 50
 		s.maxEntryLength = 1000
-		s.historyBackend = NewMemoryBackend(50)
+		s.historyBackend = history.NewMemoryBackend(50)
 	}
 
-	s.clients = newClientResolver(s.registry, s.httpClient)
+	s.clients = registry.NewClientResolver(s.registry, s.httpClient)
 
 	// Configure health tracking subsystem — Requirements: HLTH-4.1, HLTH-4.3, HLTH-4.4
 	threshold := 3
 	if cfg.healthCheckConfigured {
 		threshold = max(cfg.healthFailureThreshold, 0)
 	}
-	s.healthTracker = NewHealthTracker(threshold)
+	s.healthTracker = health.NewHealthTracker(threshold)
 
 	// Configure ping strategy (default: HTTP GET to agent card endpoint).
 	// Uses the server's existing HTTP client — no new client allocation.
 	if cfg.healthPingStrategy != nil {
 		s.pingStrategy = cfg.healthPingStrategy
 	} else {
-		s.pingStrategy = NewDefaultPingStrategy(s.httpClient)
+		s.pingStrategy = health.NewDefaultPingStrategy(s.httpClient)
 	}
 
-	s.registerTools()
+	s.registerToolsV2()
 
 	return s
 }
@@ -276,4 +279,34 @@ func (s *Server) Run(ctx context.Context) error {
 // MCPServer returns the underlying mcp.Server for advanced use cases.
 func (s *Server) MCPServer() *mcp.Server {
 	return s.mcpServer
+}
+
+// effectivePollTimeout returns the poll timeout to use for a request.
+// Per-request PollTimeoutSeconds takes precedence over the server default.
+// A negative value means no timeout (wait indefinitely).
+func (s *Server) effectivePollTimeout(requestSeconds *int) time.Duration {
+	if requestSeconds != nil {
+		if *requestSeconds < 0 {
+			return 0 // sentinel: no timeout
+		}
+		if *requestSeconds > 0 {
+			return time.Duration(*requestSeconds) * time.Second
+		}
+	}
+	return s.pollTimeout
+}
+
+// effectiveStreamTimeout returns the stream timeout to use for a request.
+// Per-request PollTimeoutSeconds takes precedence over the server default.
+// A negative value means no timeout (wait indefinitely).
+func (s *Server) effectiveStreamTimeout(requestSeconds *int) time.Duration {
+	if requestSeconds != nil {
+		if *requestSeconds < 0 {
+			return 0 // sentinel: no timeout
+		}
+		if *requestSeconds > 0 {
+			return time.Duration(*requestSeconds) * time.Second
+		}
+	}
+	return s.streamTimeout
 }

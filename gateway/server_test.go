@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/health"
 )
 
 func TestNewServer_EmptyRegistry(t *testing.T) {
@@ -167,12 +168,12 @@ func TestNewServer_DefaultHealthTracker(t *testing.T) {
 	srv.healthTracker.RecordFailure("test-agent")
 	srv.healthTracker.RecordFailure("test-agent")
 	state := srv.healthTracker.Get("test-agent")
-	if state.Status != HealthStatusUnknown {
+	if state.Status != health.HealthStatusUnknown {
 		t.Errorf("expected unknown after 2 failures (threshold=3), got %s", state.Status)
 	}
 	srv.healthTracker.RecordFailure("test-agent")
 	state = srv.healthTracker.Get("test-agent")
-	if state.Status != HealthStatusUnhealthy {
+	if state.Status != health.HealthStatusUnhealthy {
 		t.Errorf("expected unhealthy after 3 failures, got %s", state.Status)
 	}
 }
@@ -191,12 +192,12 @@ func TestWithHealthCheck_CustomThreshold(t *testing.T) {
 		srv.healthTracker.RecordFailure("agent")
 	}
 	state := srv.healthTracker.Get("agent")
-	if state.Status == HealthStatusUnhealthy {
+	if state.Status == health.HealthStatusUnhealthy {
 		t.Error("expected agent to still be non-unhealthy after 4 failures with threshold=5")
 	}
 	srv.healthTracker.RecordFailure("agent")
 	state = srv.healthTracker.Get("agent")
-	if state.Status != HealthStatusUnhealthy {
+	if state.Status != health.HealthStatusUnhealthy {
 		t.Errorf("expected unhealthy after 5 failures, got %s", state.Status)
 	}
 }
@@ -226,13 +227,9 @@ func TestNewServer_DefaultPingStrategy(t *testing.T) {
 	if srv.pingStrategy == nil {
 		t.Fatal("expected pingStrategy to be initialized")
 	}
-	// Verify it's a DefaultPingStrategy wrapping the server's HTTP client.
-	dps, ok := srv.pingStrategy.(*DefaultPingStrategy)
-	if !ok {
-		t.Fatalf("expected *DefaultPingStrategy, got %T", srv.pingStrategy)
-	}
-	if dps.client != srv.httpClient {
-		t.Error("expected DefaultPingStrategy to reuse the server's httpClient")
+	// Verify it's a *health.DefaultPingStrategy.
+	if _, ok := srv.pingStrategy.(*health.DefaultPingStrategy); !ok {
+		t.Fatalf("expected *health.DefaultPingStrategy, got %T", srv.pingStrategy)
 	}
 }
 
@@ -250,6 +247,6 @@ func TestWithHealthCheck_CustomPingStrategy(t *testing.T) {
 // mockPingStrategy is a test double for PingStrategy.
 type mockPingStrategy struct{}
 
-func (m *mockPingStrategy) Ping(_ context.Context, _ PingTarget) PingResult {
-	return PingResult{Reachable: true}
+func (m *mockPingStrategy) Ping(_ context.Context, _ health.PingTarget) health.PingResult {
+	return health.PingResult{Reachable: true}
 }

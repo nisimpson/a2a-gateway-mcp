@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/internal/tool"
 )
 
 // callTool is a test helper that calls a tool by name with the given arguments
@@ -323,8 +324,14 @@ func TestListAgents_EmptyRegistry(t *testing.T) {
 	}
 
 	text := getTextContent(t, result)
-	if text != "[]" {
-		t.Errorf("expected empty JSON array %q, got %q", "[]", text)
+	var output struct {
+		Agents []tool.ListAgentEntry `json:"agents"`
+	}
+	if err := json.Unmarshal([]byte(text), &output); err != nil {
+		t.Fatalf("failed to parse list response: %v", err)
+	}
+	if len(output.Agents) != 0 {
+		t.Errorf("expected empty agents list, got %d", len(output.Agents))
 	}
 }
 
@@ -355,10 +362,13 @@ func TestListAgents_MultipleAgents_Sorted(t *testing.T) {
 
 	text := getTextContent(t, result)
 
-	var agents []listAgentEntry
-	if err := json.Unmarshal([]byte(text), &agents); err != nil {
+	var output struct {
+		Agents []tool.ListAgentEntry `json:"agents"`
+	}
+	if err := json.Unmarshal([]byte(text), &output); err != nil {
 		t.Fatalf("failed to parse list response: %v", err)
 	}
+	agents := output.Agents
 
 	if len(agents) != 3 {
 		t.Fatalf("expected 3 agents, got %d", len(agents))
