@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
@@ -341,4 +343,52 @@ func (m *mockCallerCardStore) Remove() bool {
 	had := m.card != nil
 	m.card = nil
 	return had
+}
+
+// boolPtr returns a pointer to a bool value. Used in tests for optional fields.
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+// --- Mock Inbox ---
+
+type mockInbox struct {
+	mu      sync.Mutex
+	entries []registry.InboxEntry
+}
+
+func (m *mockInbox) Deposit(entry registry.InboxEntry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if entry.Timestamp.IsZero() {
+		entry.Timestamp = time.Now()
+	}
+	m.entries = append(m.entries, entry)
+}
+
+func (m *mockInbox) Peek(filter registry.InboxPeekFilter) []registry.InboxEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []registry.InboxEntry
+	for _, e := range m.entries {
+		if filter.Alias == "" || e.Alias == filter.Alias {
+			result = append(result, e)
+		}
+	}
+	return result
+}
+
+func (m *mockInbox) Pop(opts registry.InboxPopOptions) []registry.InboxEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var matched, remaining []registry.InboxEntry
+	for _, e := range m.entries {
+		if e.Alias == opts.Alias {
+			matched = append(matched, e)
+		} else {
+			remaining = append(remaining, e)
+		}
+	}
+	m.entries = remaining
+	return matched
 }

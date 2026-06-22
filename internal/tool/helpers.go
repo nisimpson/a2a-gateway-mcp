@@ -38,14 +38,14 @@ func sendMessageOutputSchema() *jsonschema.Schema {
 }
 
 // broadcastMessageOutputSchema returns the JSON schema for broadcast_message's structuredContent.
-// It describes a map of agent aliases to SendMessageResponse objects.
+// It describes a map of agent aliases to SendMessageResponse objects (which includes the async variant).
 func broadcastMessageOutputSchema() *jsonschema.Schema {
 	sendSchema, err := specification.SendMessageResponseSchema()
 	if err != nil {
 		panic("broadcastMessageOutputSchema: " + err.Error())
 	}
 	// The broadcast response is a map of alias → SendMessageResponse.
-	// We reuse the same definitions and reference the send schema's oneOf structure.
+	// Each value is oneOf: message, task, or async dispatch result.
 	return &jsonschema.Schema{
 		Title:                "BroadcastMessageResponse",
 		Type:                 "object",

@@ -68,6 +68,31 @@ func SendMessageResponseSchema() (jsonschema.Schema, error) {
 				Required:    []string{"task"},
 				Description: "Returned when a long-running workflow or background execution is triggered.",
 			},
+			{
+				Properties: map[string]*jsonschema.Schema{
+					"async": {
+						Type:        "object",
+						Description: "Returned when async: true — confirms dispatch without waiting for the agent's response.",
+						Properties: map[string]*jsonschema.Schema{
+							"alias": {
+								Type:        "string",
+								Description: "Agent alias the message was dispatched to.",
+							},
+							"status": {
+								Type:        "string",
+								Description: "Dispatch status (dispatched or error).",
+							},
+							"error": {
+								Type:        "string",
+								Description: "Error message if dispatch failed immediately.",
+							},
+						},
+						Required: []string{"alias", "status"},
+					},
+				},
+				Required:    []string{"async"},
+				Description: "Returned when async: true — the message was dispatched without blocking.",
+			},
 		},
 		Definitions: topDefs,
 	}

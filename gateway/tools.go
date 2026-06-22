@@ -12,6 +12,9 @@ import (
 	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
+// Compile-time interface check: MemoryInbox must satisfy tool.Inbox.
+var _ tool.Inbox = (*registry.MemoryInbox)(nil)
+
 func (s *Server) registerToolsV2() {
 	env := &tool.Env{
 		AgentRegistry:          s.registryAdapter(),
@@ -26,6 +29,7 @@ func (s *Server) registerToolsV2() {
 		AgentCardFetcher:       s.agentCardFetcherAdapter(),
 		HTTPDoer:               s.httpClient,
 		PingStrategy:           s.pingStrategy,
+		Inbox:                  s.inbox,
 		EffectivePollTimeout:   s.effectivePollTimeout,
 		EffectiveStreamTimeout: s.effectiveStreamTimeout,
 		DefaultRateLimit:       s.toolDefaultRateLimit(),
