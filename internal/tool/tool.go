@@ -26,6 +26,7 @@ type Env struct {
 	AgentCardFetcher
 	HTTPDoer
 	PingStrategy
+	Inbox
 	EffectivePollTimeout   EffectiveTimeoutFunc
 	EffectiveStreamTimeout EffectiveTimeoutFunc
 	DefaultRateLimit       RateLimitConfig
@@ -59,6 +60,8 @@ func RegisterAll(srv *mcp.Server, env *Env) {
 	AddTool(srv, NewViewCallerCardTool(env))
 	AddTool(srv, NewRemoveCallerCardTool(env))
 	AddTool(srv, NewDiscoverAgentsTool(env))
+	AddTool(srv, NewCheckInboxTool(env))
+	AddTool(srv, NewReadInboxTool(env))
 }
 
 // --- Shared types ---
@@ -193,4 +196,14 @@ type CallerCardStore interface {
 	Set(card *CallerCard, metadataKey string)
 	Get() *CallerCard
 	Remove() bool // returns true if there was a card to remove
+}
+
+// Inbox manages async response storage.
+type Inbox interface {
+	// Deposit adds an entry to the inbox. Thread-safe.
+	Deposit(entry registry.InboxEntry)
+	// Peek returns entries matching the filter without removing them.
+	Peek(filter registry.InboxPeekFilter) []registry.InboxEntry
+	// Pop removes and returns entries matching the options.
+	Pop(opts registry.InboxPopOptions) []registry.InboxEntry
 }

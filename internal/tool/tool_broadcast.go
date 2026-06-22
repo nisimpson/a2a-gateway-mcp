@@ -27,6 +27,7 @@ type BroadcastMessageInput struct {
 	Parts          []InputPart    `json:"parts,omitempty" jsonschema:"structured message parts. Takes precedence over 'message' if both provided."`
 	TimeoutSeconds *int           `json:"timeout_seconds,omitempty" jsonschema:"per-agent timeout in seconds (min 1, max 120, default 30)"`
 	Metadata       map[string]any `json:"metadata,omitempty" jsonschema:"optional metadata for A2A protocol extensions"`
+	Async          *bool          `json:"async,omitempty" jsonschema:"if true, return immediately and deposit responses in inbox"`
 }
 
 // BroadcastMessageTool handles broadcasting a message to multiple agents concurrently.
@@ -37,6 +38,7 @@ type BroadcastMessageTool struct {
 	HealthTracker      HealthTracker
 	HistoryRecorder    HistoryRecorder
 	RateLimiter        RateLimiter
+	Inbox              Inbox
 }
 
 // NewBroadcastMessageTool creates a new BroadcastMessageTool with dependencies
@@ -49,6 +51,7 @@ func NewBroadcastMessageTool(env *Env) *BroadcastMessageTool {
 		HealthTracker:      env.HealthTracker,
 		HistoryRecorder:    env.HistoryRecorder,
 		RateLimiter:        env.RateLimiter,
+		Inbox:              env.Inbox,
 	}
 }
 
@@ -73,6 +76,10 @@ func (b *BroadcastMessageTool) Handle(ctx context.Context, _ *mcp.CallToolReques
 	timeoutSeconds, err := b.resolveTimeout(input.TimeoutSeconds)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	if input.Async != nil && *input.Async {
+		return b.broadcastAsync(ctx, input, timeoutSeconds)
 	}
 
 	outcomes := b.fanOut(ctx, input, timeoutSeconds)
@@ -342,4 +349,81 @@ type broadcastResult struct {
 	Error    string       `json:"error,omitempty"`
 	Task     *a2a.Task    `json:"task,omitempty"`
 	Message  *a2a.Message `json:"message,omitempty"`
+}
+
+// broadcastAsync validates all aliases synchronously, spawns background goroutines
+// for valid agents, and returns a per-agent dispatch summary immediately.
+// Each alias maps to a SendMessageOutput with the Async field populated.
+// Requirement: AINB-2.2, AINB-2.4
+func (b *BroadcastMessageTool) broadcastAsync(_ context.Context, input *BroadcastMessageInput, timeoutSeconds int) (*mcp.CallToolResult, map[string]*SendMessageOutput, error) {
+	results := make(map[string]*SendMessageOutput, len(input.Aliases))
+
+	for _, alias := range input.Aliases {
+		// Check alias exists.
+		entry := b.AgentRegistry.Lookup(alias)
+		if entry == nil {
+			results[alias] = &SendMessageOutput{
+				Async: &AsyncSendOutput{
+					Alias:  alias,
+					Status: "error",
+					Error:  fmt.Sprintf("alias %q is not registered", alias),
+				},
+			}
+			continue
+		}
+
+		// Check rate limit.
+		if err := b.RateLimiter.CheckRateLimit(alias); err != nil {
+			results[alias] = &SendMessageOutput{
+				Async: &AsyncSendOutput{
+					Alias:  alias,
+					Status: "error",
+					Error:  fmt.Sprintf("rate limited: %s", err.Error()),
+				},
+			}
+			continue
+		}
+
+		// Dispatch background goroutine.
+		go b.backgroundBroadcastToAgent(alias, input, timeoutSeconds)
+
+		results[alias] = &SendMessageOutput{
+			Async: &AsyncSendOutput{
+				Alias:  alias,
+				Status: "dispatched",
+			},
+		}
+	}
+
+	return nil, results, nil
+}
+
+// backgroundBroadcastToAgent performs the actual agent communication in the background
+// and deposits the result into the inbox.
+// Requirement: AINB-2.3
+func (b *BroadcastMessageTool) backgroundBroadcastToAgent(alias string, input *BroadcastMessageInput, timeoutSeconds int) {
+	ctx := context.Background()
+	result, resp := b.broadcastToAgent(ctx, alias, input, timeoutSeconds)
+
+	entry := registry.InboxEntry{
+		Alias: alias,
+	}
+
+	if result != nil && result.Status == "error" {
+		entry.State = "error"
+		entry.Error = result.Error
+	} else if resp != nil {
+		if resp.Task != nil {
+			entry.TaskID = string(resp.Task.ID)
+			entry.ContextID = resp.Task.ContextID
+			entry.State = string(resp.Task.Status.State)
+			entry.Task = resp.Task
+		} else if resp.Message != nil {
+			entry.ContextID = resp.Message.ContextID
+			entry.State = "completed"
+			entry.Message = resp.Message
+		}
+	}
+
+	b.Inbox.Deposit(entry)
 }

@@ -38,6 +38,7 @@ type SendMessageInput struct {
 	TaskID             string         `json:"task_id,omitempty" jsonschema:"optional task ID to reference an existing task for follow-up messages"`
 	Metadata           map[string]any `json:"metadata,omitempty" jsonschema:"optional metadata for A2A protocol extensions (e.g. caller capabilities)"`
 	PollTimeoutSeconds *int           `json:"poll_timeout_seconds,omitempty" jsonschema:"max seconds to wait for task completion when polling or streaming (negative = no timeout, default: server configured timeout)"`
+	Async              *bool          `json:"async,omitempty" jsonschema:"if true, return immediately and deposit response in inbox"`
 }
 
 // output_schemas.go defines output schema types and JSON schema literals
@@ -53,10 +54,19 @@ type SendMessageInput struct {
 // Requirements: SRES-1.2, SRES-6.1
 
 // SendMessageOutput wraps the A2A response in a typed envelope.
-// Exactly one of Message or Task will be non-nil.
+// Exactly one of Message, Task, or Async will be non-nil.
 type SendMessageOutput struct {
-	Message *a2a.Message `json:"message,omitempty"`
-	Task    *a2a.Task    `json:"task,omitempty"`
+	Message *a2a.Message     `json:"message,omitempty"`
+	Task    *a2a.Task        `json:"task,omitempty"`
+	Async   *AsyncSendOutput `json:"async,omitempty"`
+}
+
+// AsyncSendOutput is returned when async: true. It confirms the message
+// was dispatched without waiting for the agent's response.
+type AsyncSendOutput struct {
+	Alias  string `json:"alias" jsonschema:"agent alias the message was dispatched to"`
+	Status string `json:"status" jsonschema:"dispatch status (dispatched or error)"`
+	Error  string `json:"error,omitempty" jsonschema:"error message if dispatch failed immediately"`
 }
 
 // SendMessageTool sends a message to a connected A2A agent.
@@ -70,6 +80,7 @@ type SendMessageTool struct {
 	RateLimiter            RateLimiter
 	EffectivePollTimeout   EffectiveTimeoutFunc
 	EffectiveStreamTimeout EffectiveTimeoutFunc
+	Inbox                  Inbox
 }
 
 // NewSendMessageTool constructs a SendMessageTool with all dependencies
@@ -86,6 +97,7 @@ func NewSendMessageTool(env *Env) *SendMessageTool {
 		RateLimiter:            env.RateLimiter,
 		EffectivePollTimeout:   env.EffectivePollTimeout,
 		EffectiveStreamTimeout: env.EffectiveStreamTimeout,
+		Inbox:                  env.Inbox,
 	}
 }
 func (s *SendMessageTool) Tool() *mcp.Tool {
@@ -114,6 +126,11 @@ func (s *SendMessageTool) Handle(ctx context.Context, req *mcp.CallToolRequest, 
 	sr, err := s.buildSendRequest(ctx, input)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// Async path: return immediately, perform agent communication in background.
+	if input.Async != nil && *input.Async {
+		return s.sendAsync(input, sr)
 	}
 
 	// Route to streaming or direct path.
@@ -501,4 +518,83 @@ func extractStatusMessageText(msg *a2a.Message) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+// sendAsync dispatches the message to a background goroutine and returns
+// immediately with an AsyncSendOutput response. The background goroutine
+// handles all agent communication (send, poll) and deposits the result into
+// the inbox. The async path does NOT update the context store.
+// Requirement: AINB-1.2, AINB-1.3, AINB-1.7
+func (s *SendMessageTool) sendAsync(input *SendMessageInput, sr *sendRequest) (*mcp.CallToolResult, *SendMessageOutput, error) {
+	go s.backgroundSendAndPoll(sr, input)
+
+	return nil, &SendMessageOutput{
+		Async: &AsyncSendOutput{
+			Alias:  input.Agent,
+			Status: "dispatched",
+		},
+	}, nil
+}
+
+// backgroundSendAndPoll performs the actual agent communication in a background
+// goroutine. It sends the message, handles the response (terminal → deposit,
+// non-terminal → poll then deposit), and deposits an error entry on failure.
+// Requirement: AINB-1.3, AINB-1.4
+func (s *SendMessageTool) backgroundSendAndPoll(sr *sendRequest, input *SendMessageInput) {
+	ctx := context.Background()
+
+	response, err := sr.client.SendMessage(ctx, sr.request)
+	if err != nil {
+		s.Inbox.Deposit(registry.InboxEntry{
+			Alias: input.Agent,
+			State: "error",
+			Error: err.Error(),
+		})
+		return
+	}
+
+	switch v := response.(type) {
+	case *a2a.Task:
+		if isTerminalOrInterrupted(v.Status.State) {
+			s.Inbox.Deposit(entryFromTask(input.Agent, v))
+		} else {
+			polled, pollErr := s.pollTaskCompletion(ctx, sr.client, v.ID, s.EffectivePollTimeout(nil))
+			if pollErr != nil {
+				// Poll failed/timed out — deposit what we have with the error noted.
+				s.Inbox.Deposit(registry.InboxEntry{
+					Alias:     input.Agent,
+					TaskID:    string(v.ID),
+					ContextID: v.ContextID,
+					State:     string(v.Status.State),
+					Task:      v,
+					Error:     pollErr.Error(),
+				})
+				return
+			}
+			s.Inbox.Deposit(entryFromTask(input.Agent, polled))
+		}
+	case *a2a.Message:
+		s.Inbox.Deposit(entryFromMessage(input.Agent, v))
+	}
+}
+
+// entryFromTask creates an InboxEntry from a completed task response.
+func entryFromTask(alias string, task *a2a.Task) registry.InboxEntry {
+	return registry.InboxEntry{
+		Alias:     alias,
+		TaskID:    string(task.ID),
+		ContextID: task.ContextID,
+		State:     string(task.Status.State),
+		Task:      task,
+	}
+}
+
+// entryFromMessage creates an InboxEntry from a message response.
+func entryFromMessage(alias string, msg *a2a.Message) registry.InboxEntry {
+	return registry.InboxEntry{
+		Alias:     alias,
+		ContextID: msg.ContextID,
+		State:     "completed",
+		Message:   msg,
+	}
 }

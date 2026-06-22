@@ -17,6 +17,7 @@ const (
 	defaultHTTPTimeout   = 30 * time.Second
 	taskPollTimeout      = 60 * time.Second
 	defaultStreamTimeout = 60 * time.Second
+	defaultInboxTTL      = 30 * time.Minute
 )
 
 // HealthCheckOptions configures the health tracking subsystem.
@@ -70,6 +71,9 @@ type serverConfig struct {
 	historyDepth      int
 	historyMaxEntry   int
 	historyBackend    history.Backend
+
+	// Inbox configuration
+	inboxTTL time.Duration
 }
 
 // WithHTTPClient sets a custom http.Client for all outbound A2A requests.
@@ -143,6 +147,14 @@ func WithHealthCheck(opts HealthCheckOptions) Option {
 	}
 }
 
+// WithInboxTTL sets the maximum lifetime for async inbox entries.
+// Entries older than this duration are lazily pruned. Default: 30 minutes.
+func WithInboxTTL(d time.Duration) Option {
+	return func(cfg *serverConfig) {
+		cfg.inboxTTL = d
+	}
+}
+
 // Server is the A2A Gateway MCP server. It wraps an mcp.Server and manages
 // the agent registry and context store.
 type Server struct {
@@ -170,6 +182,9 @@ type Server struct {
 	// Health tracking — Requirements: HLTH-4.1, HLTH-4.2, HLTH-4.3, HLTH-4.4, HLTH-4.5
 	healthTracker *health.HealthTracker
 	pingStrategy  health.PingStrategy
+
+	// Async inbox — Requirements: AINB-6.4, AINB-5.1, AINB-5.3
+	inbox *registry.MemoryInbox
 }
 
 // NewServer creates a new gateway server with the given options.
@@ -258,6 +273,13 @@ func NewServer(opts ...Option) *Server {
 	} else {
 		s.pingStrategy = health.NewDefaultPingStrategy(s.httpClient)
 	}
+
+	// Configure inbox TTL — Requirements: AINB-6.4, AINB-5.1, AINB-5.3
+	inboxTTL := cfg.inboxTTL
+	if inboxTTL <= 0 {
+		inboxTTL = defaultInboxTTL
+	}
+	s.inbox = registry.NewMemoryInbox(inboxTTL)
 
 	s.registerToolsV2()
 
