@@ -10,8 +10,8 @@ An MCP server that bridges the [Model Context Protocol](https://modelcontextprot
 
 a2a-gateway-mcp provides two main packages:
 
-- **`gateway`** — An MCP server library that exposes up to 14 tools for managing and communicating with A2A agents through an ephemeral, session-scoped registry. Includes per-agent rate limiting, automatic streaming transport, structured message parts, caller agent card injection, and per-agent interaction history.
-- **`directory`** — A server-side agent directory service that stores agent cards and serves them over HTTP, acting as the counterpart to the gateway's `discover_agents` tool.
+- **`gateway`** — An MCP server library that exposes up to 17 tools for managing and communicating with A2A agents through an ephemeral, session-scoped registry. Includes per-agent rate limiting, automatic streaming transport, structured message parts, caller agent card injection, async messaging with inbox, agent health checks, and per-agent interaction history.
+- **`directory`** — A server-side agent directory service that stores agent cards and serves them over HTTP, acting as the counterpart to the gateway's `discover_agents` tool. Supports filter help documentation via `?help=true`.
 
 The project also ships a standalone CLI binary that runs the gateway on stdio transport, ready to plug into any MCP-compatible client.
 
@@ -83,7 +83,7 @@ func main() {
 
 ## MCP Tools
 
-The gateway exposes up to 14 tools to MCP clients (12 core + 2 history tools when history is enabled):
+The gateway exposes up to 17 tools to MCP clients (12 core + 2 history + 3 async/health tools):
 
 | Tool | Description |
 |------|-------------|
@@ -91,6 +91,7 @@ The gateway exposes up to 14 tools to MCP clients (12 core + 2 history tools whe
 | `disconnect_agent` | Remove a registered agent by alias |
 | `list_agents` | List all connected agents with aliases, URLs, and rate limits |
 | `get_agent_card` | Retrieve an agent's capabilities from its card endpoint |
+| `ping_agent` | Perform a liveness check on a registered agent to verify reachability |
 | `send_message` | Send a text or multi-part message to an agent by alias or URL |
 | `get_task` | Retrieve the current state of a previously initiated task |
 | `cancel_task` | Cancel a running task on an A2A agent |
@@ -101,6 +102,8 @@ The gateway exposes up to 14 tools to MCP clients (12 core + 2 history tools whe
 | `remove_caller_card` | Remove the caller agent card |
 | `get_history` | Retrieve interaction history for a connected agent |
 | `clear_history` | Clear all interaction history for an agent without disconnecting |
+| `check_inbox` | List inbox entries without consuming them (peek at async responses) |
+| `read_inbox` | Read and consume inbox messages for a specific agent |
 
 ### connect_agent
 
@@ -114,11 +117,14 @@ Register an A2A agent with an alias for easy reference:
     "Authorization": "Bearer token123"
   },
   "rate_limit_rps": 10.0,
-  "rate_limit_burst": 20
+  "rate_limit_burst": 20,
+  "ping_endpoint": "/healthz"
 }
 ```
 
 Optional `rate_limit_rps` and `rate_limit_burst` set a per-agent rate limit. Both must be provided together. Omit them to use the server's global default (if configured) or unlimited throughput.
+
+Optional `ping_endpoint` sets a relative URL path for liveness checks (used by `ping_agent`). If not set, ping falls back to fetching the agent card endpoint.
 
 ### send_message
 
@@ -146,6 +152,8 @@ For structured or multi-part content, use `parts` instead of `message`:
 
 The gateway manages conversation context automatically — subsequent messages to the same agent continue the conversation. If the target agent supports streaming, the gateway uses SSE transport internally for lower latency (transparent to callers).
 
+Set `async: true` to return immediately and deposit the response in the inbox for later retrieval via `check_inbox` / `read_inbox`.
+
 ### broadcast_message
 
 Fan out a message to multiple agents simultaneously:
@@ -158,7 +166,7 @@ Fan out a message to multiple agents simultaneously:
 }
 ```
 
-Returns per-agent results with success/error status for each.
+Returns per-agent results with success/error status for each. Set `async: true` to deposit all responses in the inbox instead of waiting.
 
 ### discover_agents
 
@@ -167,10 +175,59 @@ Query an agent directory service:
 ```json
 {
   "directory_url": "https://directory.example.com/agents",
-  "query": "code review",
+  "filter": "code review",
   "limit": 5
 }
 ```
+
+To retrieve filter help documentation from the directory (learn what filter syntax is supported):
+
+```json
+{
+  "directory_url": "https://directory.example.com/agents",
+  "help": true
+}
+```
+
+When `help` is true, the tool returns structured documentation describing filter capabilities instead of agent cards.
+
+### ping_agent
+
+Check if a registered agent is reachable:
+
+```json
+{
+  "alias": "code-reviewer"
+}
+```
+
+Returns reachability status, health classification (healthy/unhealthy/unknown), and response time in milliseconds. Uses the agent's `ping_endpoint` if configured, otherwise falls back to the agent card endpoint.
+
+### check_inbox
+
+Peek at pending async responses without consuming them:
+
+```json
+{
+  "alias": "code-reviewer"
+}
+```
+
+Returns lightweight summaries (alias, task ID, state, timestamp) of pending inbox entries. Omit `alias` to see entries from all agents.
+
+### read_inbox
+
+Read and consume inbox messages for an agent:
+
+```json
+{
+  "alias": "code-reviewer",
+  "length": 5,
+  "latest": false
+}
+```
+
+Returns full message payloads and removes entries from the inbox. Use `length` to limit entries returned (FIFO order) or `latest: true` to pop all but return only the most recent.
 
 ### create_caller_card
 
@@ -262,6 +319,29 @@ GET /agents?filter=code&limit=10
 Returns a JSON array of matching agent cards. Supports:
 - `filter` — Case-insensitive substring search on name, description, and skill tags
 - `limit` — Cap the number of results returned
+- `help=true` — Return structured filter documentation instead of agent cards
+
+#### Filter help documentation
+
+```
+GET /agents?help=true
+```
+
+Returns a JSON object describing the directory's filter capabilities:
+
+```json
+{
+  "description": "Filters agent cards using case-insensitive substring matching.",
+  "syntax": "Pass a plain text string as the filter parameter...",
+  "examples": [
+    {"filter": "weather", "description": "Agents related to weather"},
+    {"filter": "code review", "description": "Agents that handle code review"}
+  ],
+  "filterable_fields": []
+}
+```
+
+Custom resolvers can implement the `FilterHelper` interface to provide documentation specific to their filter syntax. When the resolver doesn't implement `FilterHelper`, the default help describes case-insensitive substring matching.
 
 ### Custom backends
 
@@ -289,6 +369,7 @@ graph TD
         R[Agent Registry]
         CS[Context Store]
         HS[History Backend]
+        IB[Async Inbox]
         HC[HTTP Client]
     end
 
@@ -305,10 +386,11 @@ graph TD
     S --> R
     S --> CS
     S --> HS
+    S --> IB
     S --> HC
     HC -->|HTTP + per-agent headers| A1
     HC -->|HTTP + per-agent headers| A2
-    HC -->|GET ?filter=...&limit=...| D
+    HC -->|GET ?filter=...&limit=...&help=true| D
 ```
 
 ## Configuration
