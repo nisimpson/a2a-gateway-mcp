@@ -7,6 +7,44 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 )
 
+// FilterHelpResponse contains structured help documentation describing
+// the filter capabilities of a directory's FilterResolver.
+type FilterHelpResponse struct {
+	Description      string          `json:"description"`
+	Syntax           string          `json:"syntax"`
+	Examples         []FilterExample `json:"examples"`
+	FilterableFields []string        `json:"filterable_fields,omitempty"`
+}
+
+// FilterExample is a single filter example with an optional description.
+type FilterExample struct {
+	Filter      string `json:"filter"`
+	Description string `json:"description,omitempty"`
+}
+
+// FilterHelper is an optional interface that a FilterResolver can implement
+// to provide structured help documentation describing its filter capabilities.
+// If the FilterResolver does not implement FilterHelper, the handler returns
+// DefaultFilterHelp() instead.
+type FilterHelper interface {
+	FilterHelp() FilterHelpResponse
+}
+
+// DefaultFilterHelp returns a FilterHelpResponse describing the behavior of
+// the DefaultResolver (case-insensitive substring matching on name, description,
+// and skill tags).
+func DefaultFilterHelp() FilterHelpResponse {
+	return FilterHelpResponse{
+		Description: "Filters agent cards using case-insensitive substring matching.",
+		Syntax:      "Pass a plain text string as the filter parameter. Cards whose name, description, or skill tags contain the string (case-insensitive) are returned.",
+		Examples: []FilterExample{
+			{Filter: "weather", Description: "Agents related to weather"},
+			{Filter: "code review", Description: "Agents that handle code review"},
+		},
+		FilterableFields: nil,
+	}
+}
+
 // FilterResolver filters a slice of agent cards based on a filter string.
 // Used as the fallback when the Registry does not implement Filterer.
 type FilterResolver interface {
