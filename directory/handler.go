@@ -18,6 +18,19 @@ func (d *Directory) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := r.URL.Query()
+
+	// Check for help request BEFORE processing filter/limit.
+	if params.Get("help") == "true" {
+		var helpResp FilterHelpResponse
+		if helper, ok := d.resolver.(FilterHelper); ok {
+			helpResp = helper.FilterHelp()
+		} else {
+			helpResp = DefaultFilterHelp()
+		}
+		writeJSON(w, http.StatusOK, helpResp)
+		return
+	}
+
 	query := params.Get("filter")
 	limitStr := params.Get("limit")
 

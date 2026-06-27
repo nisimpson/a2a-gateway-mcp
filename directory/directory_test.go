@@ -1415,6 +1415,269 @@ func TestMemoryRegistryLenDirect(t *testing.T) {
 	}
 }
 
+// Feature: directory-filter-help, Property 2: Help parameter takes priority over filter and limit
+// **Validates: Requirements 1.1, 1.2, 1.3**
+
+func TestPropertyHelpParameterTakesPriorityOverFilterAndLimit(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("help=true response is identical regardless of filter and limit params", prop.ForAll(
+		func(filter string, limit int) bool {
+			dir := directory.New()
+
+			// Request with help=true AND random filter and limit
+			url := fmt.Sprintf("/?help=true&filter=%s&limit=%d", filter, limit)
+			reqWithParams := httptest.NewRequest(http.MethodGet, url, nil)
+			recWithParams := httptest.NewRecorder()
+			dir.ServeHTTP(recWithParams, reqWithParams)
+
+			// Request with help=true only
+			reqHelpOnly := httptest.NewRequest(http.MethodGet, "/?help=true", nil)
+			recHelpOnly := httptest.NewRecorder()
+			dir.ServeHTTP(recHelpOnly, reqHelpOnly)
+
+			// Both should return 200
+			if recWithParams.Code != http.StatusOK || recHelpOnly.Code != http.StatusOK {
+				return false
+			}
+
+			// Both responses should be byte-for-byte identical
+			return recWithParams.Body.String() == recHelpOnly.Body.String()
+		},
+		gen.AlphaString(),
+		gen.IntRange(1, 100),
+	))
+
+	properties.TestingRun(t)
+}
+
+// Feature: directory-filter-help, Property 1: Help response dispatch follows FilterHelper interface
+// **Validates: Requirements 2.2, 2.3**
+
+func TestPropertyHelpResponseDispatchFollowsFilterHelperInterface(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("resolver implementing FilterHelper returns its FilterHelp response on help=true", prop.ForAll(
+		func(helpResp directory.FilterHelpResponse) bool {
+			// Create a mock resolver that implements both FilterResolver and FilterHelper
+			mock := &mockFilterHelper{response: helpResp}
+			dir := directory.New(directory.WithFilterResolver(mock))
+
+			req := httptest.NewRequest(http.MethodGet, "/?help=true", nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				return false
+			}
+
+			var got directory.FilterHelpResponse
+			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+				return false
+			}
+
+			return filterHelpResponseEqual(got, helpResp)
+		},
+		genFilterHelpResponse(),
+	))
+
+	properties.Property("resolver NOT implementing FilterHelper returns DefaultFilterHelp on help=true", prop.ForAll(
+		func(unused string) bool {
+			// Use a plain FilterResolverFunc which does NOT implement FilterHelper
+			fn := directory.FilterResolverFunc(func(_ context.Context, _ string, cards []a2a.AgentCard) []a2a.AgentCard {
+				return cards
+			})
+			dir := directory.New(directory.WithFilterResolver(fn))
+
+			req := httptest.NewRequest(http.MethodGet, "/?help=true", nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				return false
+			}
+
+			var got directory.FilterHelpResponse
+			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+				return false
+			}
+
+			expected := directory.DefaultFilterHelp()
+			return filterHelpResponseEqual(got, expected)
+		},
+		genNonEmptyAlphaGen(),
+	))
+
+	properties.TestingRun(t)
+}
+
+// mockFilterHelper implements both FilterResolver and FilterHelper for property testing.
+type mockFilterHelper struct {
+	response directory.FilterHelpResponse
+}
+
+func (m *mockFilterHelper) Resolve(_ context.Context, _ string, cards []a2a.AgentCard) []a2a.AgentCard {
+	return cards
+}
+
+func (m *mockFilterHelper) FilterHelp() directory.FilterHelpResponse {
+	return m.response
+}
+
+// genFilterHelpResponse generates a random FilterHelpResponse.
+func genFilterHelpResponse() gopter.Gen {
+	return func(params *gopter.GenParameters) *gopter.GenResult {
+		description := genNonEmptyAlpha(params)
+		syntax := genNonEmptyAlpha(params)
+
+		// Generate 1-3 examples
+		rawExamples := params.NextInt64() % 3
+		if rawExamples < 0 {
+			rawExamples = -rawExamples
+		}
+		numExamples := int(rawExamples) + 1
+		examples := make([]directory.FilterExample, numExamples)
+		for i := range examples {
+			examples[i] = directory.FilterExample{
+				Filter:      genNonEmptyAlpha(params),
+				Description: genNonEmptyAlpha(params),
+			}
+		}
+
+		// Generate 0-3 filterable fields
+		rawFields := params.NextInt64() % 4
+		if rawFields < 0 {
+			rawFields = -rawFields
+		}
+		numFields := int(rawFields)
+		var fields []string
+		if numFields > 0 {
+			fields = make([]string, numFields)
+			for i := range fields {
+				fields[i] = genNonEmptyAlpha(params)
+			}
+		}
+
+		resp := directory.FilterHelpResponse{
+			Description:      description,
+			Syntax:           syntax,
+			Examples:         examples,
+			FilterableFields: fields,
+		}
+		return gopter.NewGenResult(resp, gopter.NoShrinker)
+	}
+}
+
+// filterHelpResponseEqual compares two FilterHelpResponse values for equality.
+func filterHelpResponseEqual(a, b directory.FilterHelpResponse) bool {
+	if a.Description != b.Description {
+		return false
+	}
+	if a.Syntax != b.Syntax {
+		return false
+	}
+	if len(a.Examples) != len(b.Examples) {
+		return false
+	}
+	for i := range a.Examples {
+		if a.Examples[i].Filter != b.Examples[i].Filter {
+			return false
+		}
+		if a.Examples[i].Description != b.Examples[i].Description {
+			return false
+		}
+	}
+	if len(a.FilterableFields) != len(b.FilterableFields) {
+		return false
+	}
+	for i := range a.FilterableFields {
+		if a.FilterableFields[i] != b.FilterableFields[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// Feature: directory-filter-help, Property 4: FilterHelpResponse JSON round-trip
+// **Validates: Requirements 3.1, 3.2, 3.3, 3.4**
+
+func TestPropertyFilterHelpResponseJSONRoundTrip(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	// Generator: non-empty Description, non-empty Syntax, 1-5 examples, 0-5 filterable fields
+	genRoundTripFilterHelp := func(params *gopter.GenParameters) *gopter.GenResult {
+		description := genNonEmptyAlpha(params)
+		syntax := genNonEmptyAlpha(params)
+
+		// Generate 1-5 examples
+		rawExamples := params.NextInt64() % 5
+		if rawExamples < 0 {
+			rawExamples = -rawExamples
+		}
+		numExamples := int(rawExamples) + 1
+		examples := make([]directory.FilterExample, numExamples)
+		for i := range examples {
+			examples[i] = directory.FilterExample{
+				Filter:      genNonEmptyAlpha(params),
+				Description: genNonEmptyAlpha(params),
+			}
+		}
+
+		// Generate 0-5 filterable fields (can be nil or non-empty)
+		rawFields := params.NextInt64() % 6
+		if rawFields < 0 {
+			rawFields = -rawFields
+		}
+		numFields := int(rawFields)
+		var fields []string
+		if numFields > 0 {
+			fields = make([]string, numFields)
+			for i := range fields {
+				fields[i] = genNonEmptyAlpha(params)
+			}
+		}
+
+		resp := directory.FilterHelpResponse{
+			Description:      description,
+			Syntax:           syntax,
+			Examples:         examples,
+			FilterableFields: fields,
+		}
+		return gopter.NewGenResult(resp, gopter.NoShrinker)
+	}
+
+	properties.Property("FilterHelpResponse JSON round-trip preserves all fields", prop.ForAll(
+		func(original directory.FilterHelpResponse) bool {
+			// Marshal to JSON
+			data, err := json.Marshal(original)
+			if err != nil {
+				return false
+			}
+
+			// Unmarshal back into a new value
+			var decoded directory.FilterHelpResponse
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				return false
+			}
+
+			// Verify equivalence
+			return filterHelpResponseEqual(original, decoded)
+		},
+		gopter.Gen(genRoundTripFilterHelp),
+	))
+
+	properties.TestingRun(t)
+}
+
 // TestDefaultResolverNoMatches verifies that the DefaultResolver returns an empty
 // slice (not nil) when no cards match the query.
 func TestDefaultResolverNoMatches(t *testing.T) {
@@ -1443,5 +1706,27 @@ func TestDefaultResolverNoMatches(t *testing.T) {
 	}
 	if len(cards) != 0 {
 		t.Fatalf("expected 0 cards, got %d", len(cards))
+	}
+}
+
+// TestDefaultFilterHelpContent validates Requirements 4.1, 4.2, 4.3:
+// The default help content describes case-insensitive substring matching,
+// has empty FilterableFields, and includes at least one example.
+func TestDefaultFilterHelpContent(t *testing.T) {
+	help := directory.DefaultFilterHelp()
+
+	// Requirement 4.1: Description mentions case-insensitive substring
+	if !strings.Contains(help.Description, "case-insensitive substring") {
+		t.Fatalf("expected Description to contain %q, got %q", "case-insensitive substring", help.Description)
+	}
+
+	// Requirement 4.2: FilterableFields is empty (default resolver does not support field-level targeting)
+	if len(help.FilterableFields) != 0 {
+		t.Fatalf("expected FilterableFields to be empty, got %v", help.FilterableFields)
+	}
+
+	// Requirement 4.3: Examples is non-empty
+	if len(help.Examples) == 0 {
+		t.Fatal("expected Examples to be non-empty")
 	}
 }

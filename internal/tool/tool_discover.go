@@ -21,6 +21,7 @@ type DiscoverAgentsInput struct {
 	Filter       string            `json:"filter,omitempty" jsonschema:"free-text search filter passed to the directory (max 256 chars)"`
 	Limit        *int              `json:"limit,omitempty" jsonschema:"maximum number of agent cards to return (min 1)"`
 	Headers      map[string]string `json:"headers,omitempty" jsonschema:"optional HTTP headers for directory authentication (max 20 entries)"`
+	Help         bool              `json:"help,omitempty" jsonschema:"if true, return filter help documentation instead of agent cards"`
 }
 
 // DiscoverAgentEntry describes a single agent card returned by discover_agents.
@@ -78,11 +79,17 @@ func (d *DiscoverAgentsTool) Handle(ctx context.Context, _ *mcp.CallToolRequest,
 	}
 
 	q := reqURL.Query()
-	if input.Filter != "" {
-		q.Set("filter", input.Filter)
-	}
-	if input.Limit != nil {
-		q.Set("limit", fmt.Sprintf("%d", *input.Limit))
+
+	// When help is requested, only append help=true; skip filter/limit.
+	if input.Help {
+		q.Set("help", "true")
+	} else {
+		if input.Filter != "" {
+			q.Set("filter", input.Filter)
+		}
+		if input.Limit != nil {
+			q.Set("limit", fmt.Sprintf("%d", *input.Limit))
+		}
 	}
 	reqURL.RawQuery = q.Encode()
 
@@ -122,6 +129,13 @@ func (d *DiscoverAgentsTool) Handle(ctx context.Context, _ *mcp.CallToolRequest,
 
 	if !json.Valid(body) {
 		return nil, nil, errors.New("directory response is not valid JSON")
+	}
+
+	// When help mode is active, return raw JSON as text content.
+	if input.Help {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
+		}, nil, nil
 	}
 
 	// Parse into output struct
