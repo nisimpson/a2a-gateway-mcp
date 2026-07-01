@@ -22,7 +22,7 @@ import (
 // don't affect structural comparison. The property validates that both paths produce
 // identical agent entries (same fields, same values) regardless of iteration order.
 func normalizeOutput(output *tool.DiscoverAgentsOutput) *tool.DiscoverAgentsOutput {
-	sorted := make([]tool.DiscoverAgentEntry, len(output.Agents))
+	sorted := make([]a2a.AgentCard, len(output.Agents))
 	copy(sorted, output.Agents)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Name < sorted[j].Name

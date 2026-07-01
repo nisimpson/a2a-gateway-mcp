@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/validate"
@@ -26,42 +27,10 @@ type DiscoverAgentsInput struct {
 	Help         bool              `json:"help,omitempty" jsonschema:"if true, return filter help documentation instead of agent cards"`
 }
 
-// DiscoverAgentEntry describes a single agent card returned by discover_agents.
-type DiscoverAgentEntry struct {
-	Name        string   `json:"name" jsonschema:"agent display name"`
-	Description string   `json:"description,omitempty" jsonschema:"agent description"`
-	URL         string   `json:"url,omitempty" jsonschema:"agent URL"`
-	Version     string   `json:"version,omitempty" jsonschema:"agent version"`
-	Skills      []any    `json:"skills,omitempty" jsonschema:"agent skills"`
-	InputModes  []string `json:"inputModes,omitempty" jsonschema:"supported input MIME types"`
-	OutputModes []string `json:"outputModes,omitempty" jsonschema:"supported output MIME types"`
-
-	// SupportedInterfaces holds the A2A spec v1.0 interface list.
-	// Used during deserialization to extract the agent URL when the flat
-	// "url" field is absent. Omitted from the output JSON.
-	SupportedInterfaces []discoverAgentInterface `json:"supportedInterfaces,omitempty" jsonschema:"-"`
-}
-
-// discoverAgentInterface mirrors the relevant fields of a2a.AgentInterface
-// for deserialization of remote directory responses.
-type discoverAgentInterface struct {
-	URL string `json:"url"`
-}
-
-// backfillURL sets URL from SupportedInterfaces[0].URL if the flat URL field
-// is empty (A2A spec v1.0 moved the URL into supportedInterfaces), then clears
-// SupportedInterfaces so it is not included in the output JSON.
-func (e *DiscoverAgentEntry) backfillURL() {
-	if e.URL == "" && len(e.SupportedInterfaces) > 0 {
-		e.URL = e.SupportedInterfaces[0].URL
-	}
-	e.SupportedInterfaces = nil
-}
-
 // DiscoverAgentsOutput is the output schema for the discover_agents tool.
 type DiscoverAgentsOutput struct {
-	Agents    []DiscoverAgentEntry `json:"agents" jsonschema:"list of discovered agent cards from the directory"`
-	NextToken string               `json:"next_token,omitempty" jsonschema:"cursor token for next page of results"`
+	Agents    []a2a.AgentCard `json:"agents" jsonschema:"list of discovered agent cards from the directory"`
+	NextToken string          `json:"next_token,omitempty" jsonschema:"cursor token for next page of results"`
 }
 
 // DiscoverAgentsTool queries a remote agent directory service and returns
@@ -263,21 +232,15 @@ func (d *DiscoverAgentsTool) handleHTTP(ctx context.Context, input *DiscoverAgen
 
 	// Parse response as QueryResult (new format with cards + next_token).
 	var qr struct {
-		Cards     []DiscoverAgentEntry `json:"cards"`
-		NextToken string               `json:"next_token,omitempty"`
+		Cards     []a2a.AgentCard `json:"cards"`
+		NextToken string          `json:"next_token,omitempty"`
 	}
 	if err := json.Unmarshal(body, &qr); err != nil {
 		return nil, nil, errors.New("directory response is not a valid query result")
 	}
 
 	if qr.Cards == nil {
-		qr.Cards = []DiscoverAgentEntry{}
-	}
-
-	// Backfill URL from supportedInterfaces for A2A spec v1.0 responses
-	// where the URL lives inside supportedInterfaces rather than a flat field.
-	for i := range qr.Cards {
-		qr.Cards[i].backfillURL()
+		qr.Cards = []a2a.AgentCard{}
 	}
 
 	output := &DiscoverAgentsOutput{
@@ -310,35 +273,9 @@ func (d *DiscoverAgentsTool) handleInProcess(ctx context.Context, input *Discove
 		}, nil, nil
 	}
 
-	// Convert a2a.AgentCard to DiscoverAgentEntry.
-	agents := make([]DiscoverAgentEntry, 0, len(result.Cards))
-	for _, card := range result.Cards {
-		entry := DiscoverAgentEntry{
-			Name:        card.Name,
-			Description: card.Description,
-			Version:     card.Version,
-		}
-		if len(card.SupportedInterfaces) > 0 {
-			entry.URL = card.SupportedInterfaces[0].URL
-		}
-		if card.Skills != nil {
-			skills := make([]any, len(card.Skills))
-			for i, s := range card.Skills {
-				skills[i] = s
-			}
-			entry.Skills = skills
-		}
-		if card.DefaultInputModes != nil {
-			entry.InputModes = card.DefaultInputModes
-		}
-		if card.DefaultOutputModes != nil {
-			entry.OutputModes = card.DefaultOutputModes
-		}
-		agents = append(agents, entry)
-	}
-
+	// Pass through agent cards directly — no conversion needed.
 	output := &DiscoverAgentsOutput{
-		Agents:    agents,
+		Agents:    result.Cards,
 		NextToken: result.NextToken,
 	}
 	return nil, output, nil
