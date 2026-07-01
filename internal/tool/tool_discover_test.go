@@ -210,6 +210,97 @@ func TestDiscover_HelpFalse_ReturnsAgentArray(t *testing.T) {
 	}
 }
 
+func TestDiscover_SupportedInterfaces_BackfillsURL(t *testing.T) {
+	// A2A spec v1.0 places the agent URL inside supportedInterfaces, not as a
+	// flat "url" field. The discover tool must backfill URL from there.
+	// Fixes: https://github.com/nisimpson/a2a-gateway-mcp/issues/35
+	responseJSON := `{"cards":[{"name":"my-agent","description":"an agent","supportedInterfaces":[{"url":"https://example.com/agents/my-agent/a2a","protocolBinding":"jsonrpc"}]}]}`
+
+	httpClient := &mockHTTPDoer{
+		DoFn: func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(responseJSON)),
+				Header:     make(http.Header),
+			}, nil
+		},
+	}
+
+	d := newDiscoverAgentsTool(httpClient)
+	_, output, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
+		DirectoryURL: "https://example.com/directory",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output == nil {
+		t.Fatal("expected non-nil output")
+	}
+	if len(output.Agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(output.Agents))
+	}
+	if output.Agents[0].URL != "https://example.com/agents/my-agent/a2a" {
+		t.Errorf("expected URL from supportedInterfaces, got %q", output.Agents[0].URL)
+	}
+}
+
+func TestDiscover_FlatURL_StillWorks(t *testing.T) {
+	// Backward compatibility: if a flat "url" field is present, it should be used directly.
+	responseJSON := `{"cards":[{"name":"legacy-agent","url":"https://legacy.example.com/agent"}]}`
+
+	httpClient := &mockHTTPDoer{
+		DoFn: func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(responseJSON)),
+				Header:     make(http.Header),
+			}, nil
+		},
+	}
+
+	d := newDiscoverAgentsTool(httpClient)
+	_, output, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
+		DirectoryURL: "https://example.com/directory",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.Agents[0].URL != "https://legacy.example.com/agent" {
+		t.Errorf("expected flat URL preserved, got %q", output.Agents[0].URL)
+	}
+}
+
+func TestDiscover_BothURLAndSupportedInterfaces_FlatWins(t *testing.T) {
+	// If both a flat "url" and supportedInterfaces are present, the flat URL wins.
+	// SupportedInterfaces must not appear in the output JSON.
+	responseJSON := `{"cards":[{"name":"agent","url":"https://flat.example.com","supportedInterfaces":[{"url":"https://iface.example.com"}]}]}`
+
+	httpClient := &mockHTTPDoer{
+		DoFn: func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(responseJSON)),
+				Header:     make(http.Header),
+			}, nil
+		},
+	}
+
+	d := newDiscoverAgentsTool(httpClient)
+	_, output, err := d.Handle(context.Background(), nil, &DiscoverAgentsInput{
+		DirectoryURL: "https://example.com/directory",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.Agents[0].URL != "https://flat.example.com" {
+		t.Errorf("expected flat URL to take precedence, got %q", output.Agents[0].URL)
+	}
+	// Verify SupportedInterfaces is cleared (won't leak into output JSON).
+	if output.Agents[0].SupportedInterfaces != nil {
+		t.Error("expected SupportedInterfaces to be nil after backfill")
+	}
+}
+
 // Feature: directory-filter-help, Property 3: Help flag controls URL construction in discover tool
 // **Validates: Requirements 5.2, 5.4**
 

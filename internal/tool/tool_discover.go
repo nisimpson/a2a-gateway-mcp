@@ -35,6 +35,27 @@ type DiscoverAgentEntry struct {
 	Skills      []any    `json:"skills,omitempty" jsonschema:"agent skills"`
 	InputModes  []string `json:"inputModes,omitempty" jsonschema:"supported input MIME types"`
 	OutputModes []string `json:"outputModes,omitempty" jsonschema:"supported output MIME types"`
+
+	// SupportedInterfaces holds the A2A spec v1.0 interface list.
+	// Used during deserialization to extract the agent URL when the flat
+	// "url" field is absent. Omitted from the output JSON.
+	SupportedInterfaces []discoverAgentInterface `json:"supportedInterfaces,omitempty" jsonschema:"-"`
+}
+
+// discoverAgentInterface mirrors the relevant fields of a2a.AgentInterface
+// for deserialization of remote directory responses.
+type discoverAgentInterface struct {
+	URL string `json:"url"`
+}
+
+// backfillURL sets URL from SupportedInterfaces[0].URL if the flat URL field
+// is empty (A2A spec v1.0 moved the URL into supportedInterfaces), then clears
+// SupportedInterfaces so it is not included in the output JSON.
+func (e *DiscoverAgentEntry) backfillURL() {
+	if e.URL == "" && len(e.SupportedInterfaces) > 0 {
+		e.URL = e.SupportedInterfaces[0].URL
+	}
+	e.SupportedInterfaces = nil
 }
 
 // DiscoverAgentsOutput is the output schema for the discover_agents tool.
@@ -251,6 +272,12 @@ func (d *DiscoverAgentsTool) handleHTTP(ctx context.Context, input *DiscoverAgen
 
 	if qr.Cards == nil {
 		qr.Cards = []DiscoverAgentEntry{}
+	}
+
+	// Backfill URL from supportedInterfaces for A2A spec v1.0 responses
+	// where the URL lives inside supportedInterfaces rather than a flat field.
+	for i := range qr.Cards {
+		qr.Cards[i].backfillURL()
 	}
 
 	output := &DiscoverAgentsOutput{
