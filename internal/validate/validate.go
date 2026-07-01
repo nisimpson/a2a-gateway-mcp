@@ -36,8 +36,9 @@ func isValidAliasChar(ch rune) bool {
 	return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-'
 }
 
-// URL checks that the URL has an http or https scheme.
-// Returns an error if the URL is empty or has an invalid scheme.
+// URL checks that the URL is non-empty, parseable, has an http or https scheme,
+// and has a non-empty host.
+// Returns an error if any of these checks fail.
 func URL(rawURL string) error {
 	if rawURL == "" {
 		return fmt.Errorf("URL is required and cannot be empty")
@@ -48,6 +49,9 @@ func URL(rawURL string) error {
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return fmt.Errorf("URL must have http or https scheme, got %q", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("URL must have a non-empty host")
 	}
 	return nil
 }

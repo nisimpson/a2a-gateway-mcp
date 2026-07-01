@@ -7,6 +7,13 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 )
 
+// QueryResult holds the result of a directory query.
+type QueryResult struct {
+	Cards     []a2a.AgentCard     `json:"cards"`
+	NextToken string              `json:"next_token,omitempty"`
+	HelpResp  *FilterHelpResponse `json:"help,omitempty"` // non-nil only when Help was requested
+}
+
 // Compile-time interface check.
 var _ http.Handler = (*Directory)(nil)
 

@@ -130,7 +130,7 @@ func (s *SendMessageTool) Handle(ctx context.Context, req *mcp.CallToolRequest, 
 
 	// Async path: return immediately, perform agent communication in background.
 	if input.Async != nil && *input.Async {
-		return s.sendAsync(input, sr)
+		return s.sendAsync(ctx, input, sr)
 	}
 
 	// Route to streaming or direct path.
@@ -525,8 +525,8 @@ func extractStatusMessageText(msg *a2a.Message) string {
 // handles all agent communication (send, poll) and deposits the result into
 // the inbox. The async path does NOT update the context store.
 // Requirement: AINB-1.2, AINB-1.3, AINB-1.7
-func (s *SendMessageTool) sendAsync(input *SendMessageInput, sr *sendRequest) (*mcp.CallToolResult, *SendMessageOutput, error) {
-	go s.backgroundSendAndPoll(sr, input)
+func (s *SendMessageTool) sendAsync(ctx context.Context, input *SendMessageInput, sr *sendRequest) (*mcp.CallToolResult, *SendMessageOutput, error) {
+	go s.backgroundSendAndPoll(ctx, sr, input)
 
 	return nil, &SendMessageOutput{
 		Async: &AsyncSendOutput{
@@ -540,10 +540,12 @@ func (s *SendMessageTool) sendAsync(input *SendMessageInput, sr *sendRequest) (*
 // goroutine. It sends the message, handles the response (terminal → deposit,
 // non-terminal → poll then deposit), and deposits an error entry on failure.
 // Requirement: AINB-1.3, AINB-1.4
-func (s *SendMessageTool) backgroundSendAndPoll(sr *sendRequest, input *SendMessageInput) {
-	ctx := context.Background()
+func (s *SendMessageTool) backgroundSendAndPoll(ctx context.Context, sr *sendRequest, input *SendMessageInput) {
+	// Derive a context that carries request-scoped values (tracing, correlation IDs)
+	// but is NOT cancelled when the original request context completes.
+	bgCtx := context.WithoutCancel(ctx)
 
-	response, err := sr.client.SendMessage(ctx, sr.request)
+	response, err := sr.client.SendMessage(bgCtx, sr.request)
 	if err != nil {
 		s.Inbox.Deposit(registry.InboxEntry{
 			Alias: input.Agent,
@@ -558,7 +560,7 @@ func (s *SendMessageTool) backgroundSendAndPoll(sr *sendRequest, input *SendMess
 		if isTerminalOrInterrupted(v.Status.State) {
 			s.Inbox.Deposit(entryFromTask(input.Agent, v))
 		} else {
-			polled, pollErr := s.pollTaskCompletion(ctx, sr.client, v.ID, s.EffectivePollTimeout(nil))
+			polled, pollErr := s.pollTaskCompletion(bgCtx, sr.client, v.ID, s.EffectivePollTimeout(nil))
 			if pollErr != nil {
 				// Poll failed/timed out — deposit what we have with the error noted.
 				s.Inbox.Deposit(registry.InboxEntry{

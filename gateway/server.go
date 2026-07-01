@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/directory"
 	"github.com/nisimpson/a2a-gateway-mcp/health"
 	"github.com/nisimpson/a2a-gateway-mcp/history"
+	"github.com/nisimpson/a2a-gateway-mcp/internal/validate"
 	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
@@ -74,6 +76,15 @@ type serverConfig struct {
 
 	// Inbox configuration
 	inboxTTL time.Duration
+
+	// Directory discovery configuration
+	defaultDirectoryURL    string               // pre-configured default URL (may be empty)
+	defaultDirectoryURLErr error                // set if URL validation failed
+	directory              *directory.Directory // self-hosted directory instance (may be nil)
+
+	// MCP SDK server options passed to mcp.NewServer.
+	// nil means use SDK defaults.
+	mcpServerOptions *mcp.ServerOptions
 }
 
 // WithHTTPClient sets a custom http.Client for all outbound A2A requests.
@@ -155,6 +166,41 @@ func WithInboxTTL(d time.Duration) Option {
 	}
 }
 
+// WithDefaultDirectoryURL sets a default directory URL used by the discover_agents
+// tool when no explicit directory_url is provided at call time. The URL must have
+// an http or https scheme and a non-empty host. An empty string clears any default.
+func WithDefaultDirectoryURL(rawURL string) Option {
+	return func(cfg *serverConfig) {
+		cfg.defaultDirectoryURL = rawURL
+		cfg.defaultDirectoryURLErr = nil
+		if rawURL != "" {
+			cfg.defaultDirectoryURLErr = validate.URL(rawURL)
+		}
+	}
+}
+
+// WithDirectory injects a self-hosted directory instance. When configured, the
+// discover_agents tool queries this directory in-process instead of making HTTP
+// requests. A nil value is treated as not configured.
+func WithDirectory(d *directory.Directory) Option {
+	return func(cfg *serverConfig) {
+		cfg.directory = d
+	}
+}
+
+// WithMCPServerOptions sets custom MCP SDK server options that are passed
+// directly to mcp.NewServer as its second argument. This allows configuring
+// SDK-level features like Instructions, Logger, KeepAlive, PageSize, and
+// protocol notification handlers without modifying the gateway package.
+//
+// If called multiple times, the last invocation wins. A nil value is
+// equivalent to not calling this option (nil is passed to mcp.NewServer).
+func WithMCPServerOptions(opts *mcp.ServerOptions) Option {
+	return func(cfg *serverConfig) {
+		cfg.mcpServerOptions = opts
+	}
+}
+
 // Server is the A2A Gateway MCP server. It wraps an mcp.Server and manages
 // the agent registry and context store.
 type Server struct {
@@ -185,6 +231,11 @@ type Server struct {
 
 	// Async inbox — Requirements: AINB-6.4, AINB-5.1, AINB-5.3
 	inbox *registry.MemoryInbox
+
+	// Directory discovery — Requirements: 1.2, 2.2, 2.4, 3.5
+	defaultDirectoryURL    string
+	defaultDirectoryURLErr error
+	directory              *directory.Directory
 }
 
 // NewServer creates a new gateway server with the given options.
@@ -204,7 +255,7 @@ func NewServer(opts ...Option) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    cfg.name,
 		Version: cfg.version,
-	}, nil)
+	}, cfg.mcpServerOptions)
 
 	s := &Server{
 		mcpServer:       mcpServer,
@@ -280,6 +331,13 @@ func NewServer(opts ...Option) *Server {
 		inboxTTL = defaultInboxTTL
 	}
 	s.inbox = registry.NewMemoryInbox(inboxTTL)
+
+	// Configure directory discovery — Requirements: 1.2, 2.2, 2.4, 3.5
+	s.defaultDirectoryURL = cfg.defaultDirectoryURL
+	s.defaultDirectoryURLErr = cfg.defaultDirectoryURLErr
+	if cfg.directory != nil {
+		s.directory = cfg.directory
+	}
 
 	s.registerToolsV2()
 

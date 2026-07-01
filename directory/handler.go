@@ -1,15 +1,41 @@
 package directory
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 )
 
+// encodeCursor encodes an offset into an opaque base64 cursor token.
+func encodeCursor(offset int) string {
+	return base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("offset:%d", offset)))
+}
+
+// decodeCursor decodes an opaque base64 cursor token into an offset.
+// Returns 0 if the cursor is empty or invalid.
+func decodeCursor(cursor string) (int, error) {
+	if cursor == "" {
+		return 0, nil
+	}
+	data, err := base64.StdEncoding.DecodeString(cursor)
+	if err != nil {
+		return 0, fmt.Errorf("invalid cursor")
+	}
+	var offset int
+	_, err = fmt.Sscanf(string(data), "offset:%d", &offset)
+	if err != nil || offset < 0 {
+		return 0, fmt.Errorf("invalid cursor")
+	}
+	return offset, nil
+}
+
 // ServeHTTP handles HTTP requests for the directory endpoint.
-// It supports GET requests with optional "filter" and "limit" query parameters.
+// It supports GET requests with optional "filter", "limit", and "cursor" query parameters.
+// Responses are always returned as a QueryResult JSON object.
 func (d *Directory) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -27,12 +53,24 @@ func (d *Directory) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			helpResp = DefaultFilterHelp()
 		}
-		writeJSON(w, http.StatusOK, helpResp)
+		result := QueryResult{
+			Cards:    []a2a.AgentCard{},
+			HelpResp: &helpResp,
+		}
+		writeJSON(w, http.StatusOK, result)
 		return
 	}
 
 	query := params.Get("filter")
 	limitStr := params.Get("limit")
+	cursorStr := params.Get("cursor")
+
+	// Decode cursor to get the offset.
+	offset, err := decodeCursor(cursorStr)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cursor"})
+		return
+	}
 
 	var limit int
 	var hasLimit bool
@@ -48,7 +86,6 @@ func (d *Directory) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	var cards []a2a.AgentCard
-	var err error
 
 	if query != "" {
 		if filterer, ok := d.registry.(Filterer); ok {
@@ -68,15 +105,28 @@ func (d *Directory) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Apply cursor offset.
+	if offset > len(cards) {
+		offset = len(cards)
+	}
+	cards = cards[offset:]
+
+	// Apply limit and compute next cursor.
+	var nextToken string
 	if hasLimit && len(cards) > limit {
 		cards = cards[:limit]
+		nextToken = encodeCursor(offset + limit)
 	}
 
 	if cards == nil {
 		cards = []a2a.AgentCard{}
 	}
 
-	writeJSON(w, http.StatusOK, cards)
+	result := QueryResult{
+		Cards:     cards,
+		NextToken: nextToken,
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // writeJSON serializes v as JSON and writes it to w with the given status code.
