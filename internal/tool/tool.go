@@ -8,10 +8,20 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nisimpson/a2a-gateway-mcp/directory"
 	"github.com/nisimpson/a2a-gateway-mcp/health"
 	"github.com/nisimpson/a2a-gateway-mcp/history"
 	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
+
+// DirectoryQuerier supports in-process agent directory queries without network calls.
+type DirectoryQuerier interface {
+	// Query returns agent cards matching the given filter and limit.
+	// An empty filter returns all cards. A zero limit means no limit.
+	// When help is true, returns nil cards and a non-nil help response.
+	// The cursor token supports pagination; pass empty string for the first page.
+	Query(ctx context.Context, filter string, limit int, cursor string, help bool) (*directory.QueryResult, error)
+}
 
 type Env struct {
 	AgentRegistry
@@ -30,6 +40,11 @@ type Env struct {
 	EffectivePollTimeout   EffectiveTimeoutFunc
 	EffectiveStreamTimeout EffectiveTimeoutFunc
 	DefaultRateLimit       RateLimitConfig
+
+	// Directory discovery configuration
+	DefaultDirectoryURL    string           // pre-configured default URL (may be empty)
+	DefaultDirectoryURLErr error            // set if URL validation failed
+	Directory              DirectoryQuerier // self-hosted directory (may be nil)
 }
 
 // ToolDefinition defines the interface that all MCP tools must implement.

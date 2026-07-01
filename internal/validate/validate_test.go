@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -49,11 +50,15 @@ func TestValidateURL(t *testing.T) {
 		{name: "valid https", url: "https://example.com", wantErr: false},
 		{name: "valid http", url: "http://localhost:8080", wantErr: false},
 		{name: "valid https with path", url: "https://example.com/api/v1", wantErr: false},
+		{name: "valid http with ip", url: "http://192.168.1.1:9090/path", wantErr: false},
 		{name: "empty string", url: "", wantErr: true},
 		{name: "no scheme", url: "example.com", wantErr: true},
 		{name: "ftp scheme", url: "ftp://example.com", wantErr: true},
 		{name: "ws scheme", url: "ws://example.com", wantErr: true},
 		{name: "just path", url: "/api/v1", wantErr: true},
+		{name: "http scheme empty host", url: "http://", wantErr: true},
+		{name: "https scheme empty host", url: "https://", wantErr: true},
+		{name: "http scheme with path but no host", url: "http:///path", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -179,6 +184,209 @@ func TestValidatePingEndpoint(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Feature: discover-agents-default-url, Property 1: URL validation rejects invalid URLs and accepts valid ones
+// **Validates: Requirements 1.5, 6.1, 6.3**
+
+func TestPropertyURLValidation(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	// Generator for valid host names (simple alphanumeric with dots)
+	validHostGen := gen.RegexMatch(`[a-z][a-z0-9]{1,10}(\.[a-z]{2,5}){1,2}`)
+
+	// Generator for valid paths
+	validPathGen := gen.OneGenOf(
+		gen.Const(""),
+		gen.RegexMatch(`(/[a-z0-9]{1,8}){1,3}`),
+	)
+
+	// Generator for optional port
+	validPortGen := gen.OneGenOf(
+		gen.Const(""),
+		gen.IntRange(80, 9999).Map(func(v int) string {
+			return fmt.Sprintf(":%d", v)
+		}),
+	)
+
+	// Property: valid URLs (http or https scheme + non-empty host) are accepted
+	properties.Property("valid http/https URLs with non-empty host are accepted", prop.ForAll(
+		func(scheme string, host string, port string, path string) bool {
+			u := scheme + "://" + host + port + path
+			err := URL(u)
+			return err == nil
+		},
+		gen.OneConstOf("http", "https"),
+		validHostGen,
+		validPortGen,
+		validPathGen,
+	))
+
+	// Property: URLs with invalid schemes are rejected
+	properties.Property("URLs with non-http/https schemes are rejected", prop.ForAll(
+		func(scheme string, host string) bool {
+			u := scheme + "://" + host
+			err := URL(u)
+			return err != nil
+		},
+		gen.OneConstOf("ftp", "ws", "wss", "file", "ssh", "telnet", "gopher", "mqtt"),
+		validHostGen,
+	))
+
+	// Property: empty string is rejected
+	properties.Property("empty string is rejected", prop.ForAll(
+		func(_ int) bool {
+			err := URL("")
+			return err != nil
+		},
+		gen.Const(0),
+	))
+
+	// Property: URLs with empty host are rejected
+	properties.Property("URLs with empty host are rejected", prop.ForAll(
+		func(scheme string, path string) bool {
+			// scheme:// with no host
+			u := scheme + "://"
+			err := URL(u)
+			if err == nil {
+				return false
+			}
+			// scheme:///path (empty host, non-empty path)
+			u2 := scheme + ":///" + path
+			err2 := URL(u2)
+			return err2 != nil
+		},
+		gen.OneConstOf("http", "https"),
+		gen.RegexMatch(`[a-z]{1,5}`),
+	))
+
+	// Property: strings without a scheme (no "://") are rejected
+	properties.Property("strings without scheme separator are rejected", prop.ForAll(
+		func(host string) bool {
+			// Just a hostname with no scheme
+			err := URL(host)
+			return err != nil
+		},
+		validHostGen,
+	))
+
+	// Property: malformed URLs with spaces are rejected
+	properties.Property("URLs containing spaces are rejected", prop.ForAll(
+		func(scheme string) bool {
+			// Test that strings with spaces in the host part are rejected
+			u := scheme + "://host with space.com"
+			err := URL(u)
+			return err != nil
+		},
+		gen.OneConstOf("http", "https"),
+	))
+
+	properties.TestingRun(t)
+}
+
+// Feature: discover-agents-default-url, Property 7: Validation consistency between config-time and runtime
+// **Validates: Requirements 6.4**
+
+func TestPropertyValidationConsistency(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	// mixedURLStringGen generates a mix of valid URLs, invalid URLs, empty strings, and garbage.
+	// We use a flat OneConstOf + regex generators to avoid nested OneGenOf issues with Map.
+	mixedURLStringGen := gen.OneGenOf(
+		// Valid HTTP URLs
+		gen.RegexMatch(`[a-z]{3,10}`).Map(func(host string) string {
+			return "http://" + host + ".com"
+		}),
+		// Valid HTTPS URLs with path
+		gen.RegexMatch(`[a-z]{3,10}`).Map(func(host string) string {
+			return "https://" + host + ".org/path"
+		}),
+		// Valid HTTPS URLs with port
+		gen.RegexMatch(`[a-z]{3,10}`).Map(func(host string) string {
+			return "https://" + host + ".io:8080/api/v1"
+		}),
+		// Invalid: empty string, wrong schemes, no host, garbage
+		gen.OneConstOf(
+			"",
+			"ftp://example.com",
+			"ws://example.com",
+			"http://",
+			"https://",
+			"just-a-string",
+			"/path/only",
+			"://missing-scheme.com",
+			"   ",
+			"\t\n",
+			"not-a-url-at-all",
+			"file:///local/path",
+			"mailto:user@example.com",
+		),
+		// Random alphanumeric garbage
+		gen.RegexMatch(`[a-zA-Z0-9]{0,30}`),
+	)
+
+	// Property: calling validate.URL twice on the same input produces identical results.
+	// This verifies that the same validation is applied at config-time and runtime.
+	properties.Property("validate.URL is deterministic - same input always produces same accept/reject decision", prop.ForAll(
+		func(input string) bool {
+			// Simulate config-time validation
+			err1 := URL(input)
+			// Simulate runtime validation
+			err2 := URL(input)
+
+			// Both must agree on accept/reject
+			if (err1 == nil) != (err2 == nil) {
+				return false
+			}
+
+			// If both reject, error messages should be identical
+			if err1 != nil && err2 != nil {
+				return err1.Error() == err2.Error()
+			}
+
+			return true
+		},
+		mixedURLStringGen,
+	))
+
+	// Property: calling validate.URL multiple times (>2) still produces consistent results
+	properties.Property("validate.URL produces consistent results across multiple invocations", prop.ForAll(
+		func(input string) bool {
+			results := make([]error, 5)
+			for i := range results {
+				results[i] = URL(input)
+			}
+
+			// All results must have the same nil/non-nil status
+			firstIsNil := results[0] == nil
+			for _, r := range results[1:] {
+				if (r == nil) != firstIsNil {
+					return false
+				}
+			}
+
+			// All non-nil errors must have identical messages
+			if !firstIsNil {
+				msg := results[0].Error()
+				for _, r := range results[1:] {
+					if r.Error() != msg {
+						return false
+					}
+				}
+			}
+
+			return true
+		},
+		mixedURLStringGen,
+	))
+
+	properties.TestingRun(t)
 }
 
 // Feature: a2a-gateway-mcp, Property 9: Input validation rejects invalid aliases

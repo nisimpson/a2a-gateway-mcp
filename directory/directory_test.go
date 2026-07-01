@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -75,13 +76,13 @@ func TestEmptyRegistryReturnsEmptyArray(t *testing.T) {
 		t.Fatalf("expected Content-Type application/json, got %q", contentType)
 	}
 
-	var cards []a2a.AgentCard
-	if err := json.NewDecoder(rec.Body).Decode(&cards); err != nil {
+	var result directory.QueryResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(cards) != 0 {
-		t.Fatalf("expected empty array, got %d cards", len(cards))
+	if len(result.Cards) != 0 {
+		t.Fatalf("expected empty array, got %d cards", len(result.Cards))
 	}
 }
 
@@ -183,6 +184,14 @@ func TestCustomQueryResolverInvoked(t *testing.T) {
 	if resolver.query != "test" {
 		t.Fatalf("expected resolver to receive query 'test', got %q", resolver.query)
 	}
+
+	var result directory.QueryResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(result.Cards) != 1 {
+		t.Fatalf("expected 1 card, got %d", len(result.Cards))
+	}
 }
 
 // TestEmptyQueryReturnsAllWithoutResolver validates Requirement 4.5:
@@ -225,13 +234,13 @@ func TestEmptyQueryReturnsAllWithoutResolver(t *testing.T) {
 				t.Fatal("expected QueryResolver NOT to be invoked for empty/missing query")
 			}
 
-			var cards []a2a.AgentCard
-			if err := json.NewDecoder(rec.Body).Decode(&cards); err != nil {
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 				t.Fatalf("failed to decode response: %v", err)
 			}
 
-			if len(cards) != 2 {
-				t.Fatalf("expected 2 cards, got %d", len(cards))
+			if len(result.Cards) != 2 {
+				t.Fatalf("expected 2 cards, got %d", len(result.Cards))
 			}
 		})
 	}
@@ -263,17 +272,17 @@ func TestHandlerAtDifferentServeMuxPrefixes(t *testing.T) {
 				t.Fatalf("expected status 200 at prefix %q, got %d", prefix, rec.Code)
 			}
 
-			var cards []a2a.AgentCard
-			if err := json.NewDecoder(rec.Body).Decode(&cards); err != nil {
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 				t.Fatalf("failed to decode response at prefix %q: %v", prefix, err)
 			}
 
-			if len(cards) != 1 {
-				t.Fatalf("expected 1 card at prefix %q, got %d", prefix, len(cards))
+			if len(result.Cards) != 1 {
+				t.Fatalf("expected 1 card at prefix %q, got %d", prefix, len(result.Cards))
 			}
 
-			if cards[0].Name != "mux-agent" {
-				t.Fatalf("expected card name 'mux-agent', got %q", cards[0].Name)
+			if result.Cards[0].Name != "mux-agent" {
+				t.Fatalf("expected card name 'mux-agent', got %q", result.Cards[0].Name)
 			}
 		})
 	}
@@ -356,13 +365,13 @@ func TestListenAndServe_StartsAndAcceptsConnections(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}
 
-	var cards []a2a.AgentCard
-	if err := json.NewDecoder(resp.Body).Decode(&cards); err != nil {
+	var result directory.QueryResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(cards) != 1 || cards[0].Name != "server-agent" {
-		t.Fatalf("expected 1 card named 'server-agent', got %v", cards)
+	if len(result.Cards) != 1 || result.Cards[0].Name != "server-agent" {
+		t.Fatalf("expected 1 card named 'server-agent', got %v", result.Cards)
 	}
 
 	// Clean up
@@ -615,13 +624,13 @@ func TestPropertyRegistrationMakesCardsDiscoverable(t *testing.T) {
 				return false
 			}
 
-			var cards []a2a.AgentCard
-			if err := json.NewDecoder(rec.Body).Decode(&cards); err != nil {
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 				return false
 			}
 
 			// Verify the registered card is present
-			for _, c := range cards {
+			for _, c := range result.Cards {
 				if c.Name == card.Name {
 					return true
 				}
@@ -667,14 +676,14 @@ func TestPropertyDuplicateRegistrationReplacesEntry(t *testing.T) {
 				return false
 			}
 
-			var cards []a2a.AgentCard
-			if err := json.NewDecoder(rec.Body).Decode(&cards); err != nil {
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 				return false
 			}
 
 			// Should have exactly one card with this name
 			count := 0
-			for _, c := range cards {
+			for _, c := range result.Cards {
 				if c.Name == name {
 					count++
 					if c.Description != desc2 {
@@ -746,14 +755,14 @@ func TestPropertyConcurrentRegisterUnregisterSafety(t *testing.T) {
 				return false
 			}
 
-			var remaining []a2a.AgentCard
-			if err := json.NewDecoder(rec.Body).Decode(&remaining); err != nil {
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 				return false
 			}
 
 			// Expected remaining = n - half
 			expected := n - half
-			return len(remaining) == expected
+			return len(result.Cards) == expected
 		},
 		gen.IntRange(1, 50),
 	))
@@ -804,12 +813,12 @@ func TestPropertyUnregisterRemovesCardAndSignalsAbsence(t *testing.T) {
 			rec := httptest.NewRecorder()
 			dir.ServeHTTP(rec, req)
 
-			var listed []a2a.AgentCard
-			if err := json.NewDecoder(rec.Body).Decode(&listed); err != nil {
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 				return false
 			}
 
-			for _, c := range listed {
+			for _, c := range result.Cards {
 				if c.Name == targetName {
 					return false
 				}
@@ -879,8 +888,8 @@ func TestPropertyDefaultResolverReturnsExactlyMatchingCards(t *testing.T) {
 				return false
 			}
 
-			var results []a2a.AgentCard
-			if err := json.NewDecoder(rec.Body).Decode(&results); err != nil {
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 				return false
 			}
 
@@ -897,7 +906,7 @@ func TestPropertyDefaultResolverReturnsExactlyMatchingCards(t *testing.T) {
 
 			// Verify no false positives
 			resultNames := make(map[string]bool)
-			for _, r := range results {
+			for _, r := range result.Cards {
 				resultNames[r.Name] = true
 				if !expected[r.Name] {
 					return false // false positive
@@ -967,18 +976,18 @@ func TestPropertyLimitCapsResultCount(t *testing.T) {
 				return false
 			}
 
-			var cards []a2a.AgentCard
-			if err := json.NewDecoder(rec.Body).Decode(&cards); err != nil {
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 				return false
 			}
 
 			// Result should be at most limit
-			if len(cards) > limit {
+			if len(result.Cards) > limit {
 				return false
 			}
 
 			// If total cards exceed limit, result should be exactly limit
-			if n > limit && len(cards) != limit {
+			if n > limit && len(result.Cards) != limit {
 				return false
 			}
 
@@ -1095,16 +1104,16 @@ func TestPropertyJSONSerializationRoundTrip(t *testing.T) {
 			}
 
 			// Deserialize
-			var cards []a2a.AgentCard
-			if err := json.NewDecoder(rec.Body).Decode(&cards); err != nil {
+			var qr directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&qr); err != nil {
 				return false
 			}
 
-			if len(cards) != 1 {
+			if len(qr.Cards) != 1 {
 				return false
 			}
 
-			result := cards[0]
+			result := qr.Cards[0]
 
 			// Verify equivalence
 			if result.Name != card.Name {
@@ -1216,12 +1225,12 @@ func TestMemoryRegistryLen(t *testing.T) {
 	rec := httptest.NewRecorder()
 	dir.ServeHTTP(rec, req)
 
-	var cards []a2a.AgentCard
-	if err := json.NewDecoder(rec.Body).Decode(&cards); err != nil {
+	var result directory.QueryResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if len(cards) != 3 {
-		t.Fatalf("expected 3 cards, got %d", len(cards))
+	if len(result.Cards) != 3 {
+		t.Fatalf("expected 3 cards, got %d", len(result.Cards))
 	}
 }
 
@@ -1257,12 +1266,12 @@ func TestQueryResolverFuncAdapter(t *testing.T) {
 		t.Fatal("expected QueryResolverFunc to be called")
 	}
 
-	var cards []a2a.AgentCard
-	if err := json.NewDecoder(rec.Body).Decode(&cards); err != nil {
+	var result directory.QueryResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if len(cards) != 1 || cards[0].Name != "match-agent" {
-		t.Fatalf("expected 1 card named 'match-agent', got %v", cards)
+	if len(result.Cards) != 1 || result.Cards[0].Name != "match-agent" {
+		t.Fatalf("expected 1 card named 'match-agent', got %v", result.Cards)
 	}
 }
 
@@ -1279,12 +1288,12 @@ func TestQuerierInterfaceUsed(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 
-	var cards []a2a.AgentCard
-	if err := json.NewDecoder(rec.Body).Decode(&cards); err != nil {
+	var result directory.QueryResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if len(cards) != 1 || cards[0].Name != "filterer-result" {
-		t.Fatalf("expected filterer result, got %v", cards)
+	if len(result.Cards) != 1 || result.Cards[0].Name != "filterer-result" {
+		t.Fatalf("expected filterer result, got %v", result.Cards)
 	}
 }
 
@@ -1477,12 +1486,16 @@ func TestPropertyHelpResponseDispatchFollowsFilterHelperInterface(t *testing.T) 
 				return false
 			}
 
-			var got directory.FilterHelpResponse
-			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 				return false
 			}
 
-			return filterHelpResponseEqual(got, helpResp)
+			if result.HelpResp == nil {
+				return false
+			}
+
+			return filterHelpResponseEqual(*result.HelpResp, helpResp)
 		},
 		genFilterHelpResponse(),
 	))
@@ -1503,13 +1516,17 @@ func TestPropertyHelpResponseDispatchFollowsFilterHelperInterface(t *testing.T) 
 				return false
 			}
 
-			var got directory.FilterHelpResponse
-			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+				return false
+			}
+
+			if result.HelpResp == nil {
 				return false
 			}
 
 			expected := directory.DefaultFilterHelp()
-			return filterHelpResponseEqual(got, expected)
+			return filterHelpResponseEqual(*result.HelpResp, expected)
 		},
 		genNonEmptyAlphaGen(),
 	))
@@ -1700,12 +1717,12 @@ func TestDefaultResolverNoMatches(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 
-	var cards []a2a.AgentCard
-	if err := json.NewDecoder(rec.Body).Decode(&cards); err != nil {
+	var result directory.QueryResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if len(cards) != 0 {
-		t.Fatalf("expected 0 cards, got %d", len(cards))
+	if len(result.Cards) != 0 {
+		t.Fatalf("expected 0 cards, got %d", len(result.Cards))
 	}
 }
 
@@ -1728,5 +1745,424 @@ func TestDefaultFilterHelpContent(t *testing.T) {
 	// Requirement 4.3: Examples is non-empty
 	if len(help.Examples) == 0 {
 		t.Fatal("expected Examples to be non-empty")
+	}
+}
+
+// Feature: discover-agents-default-url, Property 8: Cursor-based pagination returns disjoint pages that cover the full result set
+// **Validates: Pagination correctness**
+
+// orderedRegistry is a test-only Registry that returns cards in insertion order.
+// This isolates the pagination logic from Go map iteration non-determinism.
+type orderedRegistry struct {
+	mu    sync.RWMutex
+	cards []a2a.AgentCard
+}
+
+func (r *orderedRegistry) Register(_ context.Context, card a2a.AgentCard) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Replace if exists
+	for i, c := range r.cards {
+		if c.Name == card.Name {
+			r.cards[i] = card
+			return nil
+		}
+	}
+	r.cards = append(r.cards, card)
+	return nil
+}
+
+func (r *orderedRegistry) Unregister(_ context.Context, name string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, c := range r.cards {
+		if c.Name == name {
+			r.cards = append(r.cards[:i], r.cards[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *orderedRegistry) List(_ context.Context) ([]a2a.AgentCard, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]a2a.AgentCard, len(r.cards))
+	copy(result, r.cards)
+	return result, nil
+}
+
+func (r *orderedRegistry) Len(_ context.Context) (int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.cards), nil
+}
+
+func TestPropertyCursorBasedPaginationDisjointAndComplete(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("iterating pages via cursor tokens produces disjoint pages whose union equals the full result set", prop.ForAll(
+		func(numCards int, pageSize int) bool {
+			// Use an ordered registry so List() returns stable order across requests
+			reg := &orderedRegistry{}
+			dir := directory.New(directory.WithRegistry(reg))
+			ctx := context.Background()
+
+			// Register numCards unique cards
+			allNames := make(map[string]bool)
+			for i := 0; i < numCards; i++ {
+				name := fmt.Sprintf("agent-%04d", i)
+				card := a2a.AgentCard{
+					Name:        name,
+					Description: fmt.Sprintf("Agent number %d", i),
+				}
+				if err := dir.Register(ctx, card); err != nil {
+					return false
+				}
+				allNames[name] = true
+			}
+
+			// Use httptest server to simulate real HTTP pagination
+			server := httptest.NewServer(dir)
+			defer server.Close()
+
+			// Iterate pages
+			var collectedNames []string
+			seenNames := make(map[string]bool)
+			cursor := ""
+			maxIterations := numCards + 1 // safety bound to prevent infinite loops
+
+			for i := 0; i < maxIterations; i++ {
+				reqURL := server.URL + "/?limit=" + fmt.Sprintf("%d", pageSize)
+				if cursor != "" {
+					reqURL += "&cursor=" + url.QueryEscape(cursor)
+				}
+
+				resp, err := http.Get(reqURL)
+				if err != nil {
+					return false
+				}
+
+				if resp.StatusCode != http.StatusOK {
+					resp.Body.Close()
+					return false
+				}
+
+				var result directory.QueryResult
+				if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+					resp.Body.Close()
+					return false
+				}
+				resp.Body.Close()
+
+				// Check page size does not exceed limit
+				if len(result.Cards) > pageSize {
+					return false
+				}
+
+				// Check disjointness: no card should appear in multiple pages
+				for _, card := range result.Cards {
+					if seenNames[card.Name] {
+						return false // duplicate across pages
+					}
+					seenNames[card.Name] = true
+					collectedNames = append(collectedNames, card.Name)
+				}
+
+				// If NextToken is empty, we've reached the final page
+				if result.NextToken == "" {
+					break
+				}
+
+				cursor = result.NextToken
+			}
+
+			// Verify full coverage: collected names == all registered names
+			if len(collectedNames) != numCards {
+				return false
+			}
+			for name := range allNames {
+				if !seenNames[name] {
+					return false
+				}
+			}
+
+			return true
+		},
+		gen.IntRange(5, 100),
+		gen.IntRange(1, 20),
+	))
+
+	properties.TestingRun(t)
+}
+
+// --- Unit Tests for Directory Handler Pagination ---
+// Task 1.4: Write unit tests for directory handler pagination
+// Requirements: 4.2, 4.3, 4.5
+
+// TestCursorEmptyResultSetReturnsNoNextToken validates that when the directory is empty,
+// a cursor-based query returns {"cards": []} with no next_token.
+func TestCursorEmptyResultSetReturnsNoNextToken(t *testing.T) {
+	dir := directory.New()
+
+	req := httptest.NewRequest(http.MethodGet, "/?limit=10&cursor=", nil)
+	rec := httptest.NewRecorder()
+	dir.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var result directory.QueryResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(result.Cards) != 0 {
+		t.Fatalf("expected 0 cards, got %d", len(result.Cards))
+	}
+
+	if result.NextToken != "" {
+		t.Fatalf("expected empty NextToken for empty result set, got %q", result.NextToken)
+	}
+}
+
+// stableRegistry is a Registry that returns cards in insertion order.
+// Used for pagination tests where stable ordering is required.
+type stableRegistry struct {
+	mu    sync.Mutex
+	cards []a2a.AgentCard
+}
+
+func (r *stableRegistry) Register(_ context.Context, card a2a.AgentCard) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Replace if exists
+	for i, c := range r.cards {
+		if c.Name == card.Name {
+			r.cards[i] = card
+			return nil
+		}
+	}
+	r.cards = append(r.cards, card)
+	return nil
+}
+
+func (r *stableRegistry) Unregister(_ context.Context, name string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, c := range r.cards {
+		if c.Name == name {
+			r.cards = append(r.cards[:i], r.cards[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *stableRegistry) List(_ context.Context) ([]a2a.AgentCard, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]a2a.AgentCard, len(r.cards))
+	copy(result, r.cards)
+	return result, nil
+}
+
+func (r *stableRegistry) Len(_ context.Context) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.cards), nil
+}
+
+// TestCursorWithLimitLessThanTotalReturnsNextToken validates that when limit < total cards,
+// the response includes a valid next_token and paginating returns all cards.
+// Uses a stableRegistry to ensure deterministic ordering for offset-based pagination.
+func TestCursorWithLimitLessThanTotalReturnsNextToken(t *testing.T) {
+	reg := &stableRegistry{}
+	dir := directory.New(directory.WithRegistry(reg))
+	ctx := context.Background()
+
+	// Register 5 cards (stableRegistry preserves insertion order)
+	for i := 0; i < 5; i++ {
+		if err := dir.Register(ctx, a2a.AgentCard{
+			Name:        fmt.Sprintf("agent-%d", i),
+			Description: fmt.Sprintf("Agent number %d", i),
+		}); err != nil {
+			t.Fatalf("failed to register card: %v", err)
+		}
+	}
+
+	// First page: limit=3
+	req := httptest.NewRequest(http.MethodGet, "/?limit=3", nil)
+	rec := httptest.NewRecorder()
+	dir.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for first page, got %d", rec.Code)
+	}
+
+	var page1 directory.QueryResult
+	if err := json.NewDecoder(rec.Body).Decode(&page1); err != nil {
+		t.Fatalf("failed to decode first page: %v", err)
+	}
+
+	if len(page1.Cards) != 3 {
+		t.Fatalf("expected 3 cards on first page, got %d", len(page1.Cards))
+	}
+
+	if page1.NextToken == "" {
+		t.Fatal("expected non-empty NextToken on first page when more results remain")
+	}
+
+	// Second page: use the cursor from first page
+	req2 := httptest.NewRequest(http.MethodGet, "/?limit=3&cursor="+page1.NextToken, nil)
+	rec2 := httptest.NewRecorder()
+	dir.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for second page, got %d", rec2.Code)
+	}
+
+	var page2 directory.QueryResult
+	if err := json.NewDecoder(rec2.Body).Decode(&page2); err != nil {
+		t.Fatalf("failed to decode second page: %v", err)
+	}
+
+	if len(page2.Cards) != 2 {
+		t.Fatalf("expected 2 cards on second page, got %d", len(page2.Cards))
+	}
+
+	if page2.NextToken != "" {
+		t.Fatalf("expected empty NextToken on last page, got %q", page2.NextToken)
+	}
+
+	// Verify no overlap between pages (stable ordering guarantees disjoint pages)
+	page1Names := make(map[string]bool)
+	for _, c := range page1.Cards {
+		page1Names[c.Name] = true
+	}
+	for _, c := range page2.Cards {
+		if page1Names[c.Name] {
+			t.Fatalf("card %q appears on both pages", c.Name)
+		}
+	}
+
+	// Verify total coverage
+	totalCards := len(page1.Cards) + len(page2.Cards)
+	if totalCards != 5 {
+		t.Fatalf("expected 5 total cards across pages, got %d", totalCards)
+	}
+}
+
+// TestInvalidCursorReturnsError validates that an invalid cursor (e.g., "garbage")
+// returns HTTP 400 with an error message.
+func TestInvalidCursorReturnsError(t *testing.T) {
+	dir := directory.New()
+	ctx := context.Background()
+
+	// Register a card so the directory is non-empty
+	if err := dir.Register(ctx, a2a.AgentCard{Name: "test-agent"}); err != nil {
+		t.Fatalf("failed to register card: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		cursor string
+	}{
+		{"garbage string", "garbage"},
+		{"invalid base64", "!!!notbase64!!!"},
+		{"valid base64 but wrong format", "aGVsbG8="}, // base64 of "hello"
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/?cursor="+tc.cursor, nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400 for cursor=%q, got %d", tc.cursor, rec.Code)
+			}
+
+			var body map[string]string
+			if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode error response: %v", err)
+			}
+
+			if body["error"] != "invalid cursor" {
+				t.Fatalf("expected error 'invalid cursor', got %q", body["error"])
+			}
+		})
+	}
+}
+
+// TestHelpTrueResponseFormatMatchesQueryResult validates that help=true returns
+// a QueryResult with the help field populated and cards as an empty array.
+func TestHelpTrueResponseFormatMatchesQueryResult(t *testing.T) {
+	dir := directory.New()
+	ctx := context.Background()
+
+	// Register some cards to verify they are NOT returned when help=true
+	if err := dir.Register(ctx, a2a.AgentCard{Name: "agent-1"}); err != nil {
+		t.Fatalf("failed to register card: %v", err)
+	}
+	if err := dir.Register(ctx, a2a.AgentCard{Name: "agent-2"}); err != nil {
+		t.Fatalf("failed to register card: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?help=true", nil)
+	rec := httptest.NewRecorder()
+	dir.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	// Decode as raw JSON first to verify the structure
+	var rawResult map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &rawResult); err != nil {
+		t.Fatalf("failed to decode raw response: %v", err)
+	}
+
+	// Verify "cards" field exists and is an empty array
+	cardsRaw, ok := rawResult["cards"]
+	if !ok {
+		t.Fatal("expected 'cards' field in response")
+	}
+	var cards []a2a.AgentCard
+	if err := json.Unmarshal(cardsRaw, &cards); err != nil {
+		t.Fatalf("failed to decode 'cards' field: %v", err)
+	}
+	if len(cards) != 0 {
+		t.Fatalf("expected empty cards array when help=true, got %d cards", len(cards))
+	}
+
+	// Verify "help" field exists and is populated
+	helpRaw, ok := rawResult["help"]
+	if !ok {
+		t.Fatal("expected 'help' field in response when help=true")
+	}
+	var helpResp directory.FilterHelpResponse
+	if err := json.Unmarshal(helpRaw, &helpResp); err != nil {
+		t.Fatalf("failed to decode 'help' field: %v", err)
+	}
+
+	// Verify help response is non-empty
+	if helpResp.Description == "" {
+		t.Fatal("expected non-empty Description in help response")
+	}
+	if helpResp.Syntax == "" {
+		t.Fatal("expected non-empty Syntax in help response")
+	}
+	if len(helpResp.Examples) == 0 {
+		t.Fatal("expected non-empty Examples in help response")
+	}
+
+	// Verify "next_token" is NOT present (omitempty means it should be absent)
+	if _, hasNextToken := rawResult["next_token"]; hasNextToken {
+		t.Fatal("expected 'next_token' to be absent when help=true")
 	}
 }
