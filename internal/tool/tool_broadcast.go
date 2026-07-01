@@ -355,7 +355,7 @@ type broadcastResult struct {
 // for valid agents, and returns a per-agent dispatch summary immediately.
 // Each alias maps to a SendMessageOutput with the Async field populated.
 // Requirement: AINB-2.2, AINB-2.4
-func (b *BroadcastMessageTool) broadcastAsync(_ context.Context, input *BroadcastMessageInput, timeoutSeconds int) (*mcp.CallToolResult, map[string]*SendMessageOutput, error) {
+func (b *BroadcastMessageTool) broadcastAsync(ctx context.Context, input *BroadcastMessageInput, timeoutSeconds int) (*mcp.CallToolResult, map[string]*SendMessageOutput, error) {
 	results := make(map[string]*SendMessageOutput, len(input.Aliases))
 
 	for _, alias := range input.Aliases {
@@ -385,7 +385,7 @@ func (b *BroadcastMessageTool) broadcastAsync(_ context.Context, input *Broadcas
 		}
 
 		// Dispatch background goroutine.
-		go b.backgroundBroadcastToAgent(alias, input, timeoutSeconds)
+		go b.backgroundBroadcastToAgent(ctx, alias, input, timeoutSeconds)
 
 		results[alias] = &SendMessageOutput{
 			Async: &AsyncSendOutput{
@@ -401,9 +401,11 @@ func (b *BroadcastMessageTool) broadcastAsync(_ context.Context, input *Broadcas
 // backgroundBroadcastToAgent performs the actual agent communication in the background
 // and deposits the result into the inbox.
 // Requirement: AINB-2.3
-func (b *BroadcastMessageTool) backgroundBroadcastToAgent(alias string, input *BroadcastMessageInput, timeoutSeconds int) {
-	ctx := context.Background()
-	result, resp := b.broadcastToAgent(ctx, alias, input, timeoutSeconds)
+func (b *BroadcastMessageTool) backgroundBroadcastToAgent(ctx context.Context, alias string, input *BroadcastMessageInput, timeoutSeconds int) {
+	// Derive a context that carries request-scoped values (tracing, correlation IDs)
+	// but is NOT cancelled when the original request context completes.
+	bgCtx := context.WithoutCancel(ctx)
+	result, resp := b.broadcastToAgent(bgCtx, alias, input, timeoutSeconds)
 
 	entry := registry.InboxEntry{
 		Alias: alias,
