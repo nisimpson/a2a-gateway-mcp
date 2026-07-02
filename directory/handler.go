@@ -3,6 +3,7 @@ package directory
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -45,10 +46,13 @@ func (d *Directory) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	params := r.URL.Query()
 
-	// Check for help request BEFORE processing filter/limit.
+	// Check for help request BEFORE processing filter/limit/cursor.
+	// Help resolution priority: Registry FilterHelper → FilterResolver FilterHelper → DefaultFilterHelp().
 	if params.Get("help") == "true" {
 		var helpResp FilterHelpResponse
-		if helper, ok := d.resolver.(FilterHelper); ok {
+		if helper, ok := d.registry.(FilterHelper); ok {
+			helpResp = helper.FilterHelp()
+		} else if helper, ok := d.resolver.(FilterHelper); ok {
 			helpResp = helper.FilterHelp()
 		} else {
 			helpResp = DefaultFilterHelp()
@@ -64,6 +68,47 @@ func (d *Directory) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	query := params.Get("filter")
 	limitStr := params.Get("limit")
 	cursorStr := params.Get("cursor")
+
+	ctx := r.Context()
+
+	// Priority 1: Querier — full delegation with opaque cursor.
+	if querier, ok := d.registry.(Querier); ok {
+		// Parse limit for the Querier path: 0 means "no limit", pass through as-is.
+		var limit int
+		if limitStr != "" {
+			parsed, err := strconv.Atoi(limitStr)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be a positive integer"})
+				return
+			}
+			limit = parsed
+		}
+
+		// Do NOT hold any mutex across the Query call.
+		cards, nextCursor, err := querier.Query(ctx, query, limit, cursorStr)
+		if err != nil {
+			if errors.Is(err, ErrInvalidCursor) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cursor"})
+			} else {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			}
+			return
+		}
+
+		// Normalize nil cards to empty slice for JSON serialization.
+		if cards == nil {
+			cards = []a2a.AgentCard{}
+		}
+
+		result := QueryResult{
+			Cards:     cards,
+			NextToken: nextCursor,
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
+	// Priority 2 & 3: Filterer or List+FilterResolver with offset-based cursor.
 
 	// Decode cursor to get the offset.
 	offset, err := decodeCursor(cursorStr)
@@ -84,7 +129,6 @@ func (d *Directory) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		limit = parsed
 	}
 
-	ctx := r.Context()
 	var cards []a2a.AgentCard
 
 	if query != "" {
