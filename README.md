@@ -11,7 +11,7 @@ An MCP server that bridges the [Model Context Protocol](https://modelcontextprot
 a2a-gateway-mcp provides two main packages:
 
 - **`gateway`** — An MCP server library that exposes up to 17 tools for managing and communicating with A2A agents through an ephemeral, session-scoped registry. Includes per-agent rate limiting, automatic streaming transport, structured message parts, caller agent card injection, async messaging with inbox, agent health checks, and per-agent interaction history.
-- **`directory`** — A server-side agent directory service that stores agent cards and serves them over HTTP, acting as the counterpart to the gateway's `discover_agents` tool. Supports filter help documentation via `?help=true`.
+- **`directory`** — A server-side agent directory service that stores agent cards and serves them over HTTP, acting as the counterpart to the gateway's `discover_agents` tool. Supports cursor-based pagination, filter help documentation via `?help=true`, and an optional `Querier` interface for database-backed registries to own the full query lifecycle.
 
 The project also ships a standalone CLI binary that runs the gateway on stdio transport, ready to plug into any MCP-compatible client.
 
@@ -313,13 +313,25 @@ http.ListenAndServe(":8080", mux)
 ### HTTP API
 
 ```
-GET /agents?filter=code&limit=10
+GET /agents?filter=code&limit=10&cursor=<token>
 ```
 
-Returns a JSON array of matching agent cards. Supports:
+Returns a JSON object with matching agent cards and an optional pagination cursor. Supports:
 - `filter` — Case-insensitive substring search on name, description, and skill tags
-- `limit` — Cap the number of results returned
+- `limit` — Cap the number of results returned per page
+- `cursor` — Opaque pagination token from a previous response's `next_token` field
 - `help=true` — Return structured filter documentation instead of agent cards
+
+Response format:
+
+```json
+{
+  "cards": [...],
+  "next_token": "opaque-cursor-for-next-page"
+}
+```
+
+The `next_token` field is omitted when there are no more results.
 
 #### Filter help documentation
 
@@ -341,7 +353,7 @@ Returns a JSON object describing the directory's filter capabilities:
 }
 ```
 
-Custom resolvers can implement the `FilterHelper` interface to provide documentation specific to their filter syntax. When the resolver doesn't implement `FilterHelper`, the default help describes case-insensitive substring matching.
+Custom resolvers can implement the `FilterHelper` interface to provide documentation specific to their filter syntax. The help resolution priority is: Registry `FilterHelper` → FilterResolver `FilterHelper` → default help. This means a `Querier`-implementing registry can also provide `FilterHelper` to document its custom filter syntax.
 
 ### Custom backends
 
@@ -354,7 +366,46 @@ dir := directory.New(
 )
 ```
 
-Registries that support native querying can implement the optional `Filterer` interface to push filtering down to the storage layer.
+#### Filterer interface
+
+Registries that support native filtering can implement the optional `Filterer` interface to push filter evaluation down to the storage layer:
+
+```go
+type Filterer interface {
+    Filter(ctx context.Context, filter string) ([]a2a.AgentCard, error)
+}
+```
+
+The handler still manages offset-based cursor pagination in memory.
+
+#### Querier interface
+
+For database-backed registries that need full control over filtering, pagination, and cursor management in a single query, implement the `Querier` interface:
+
+```go
+type Querier interface {
+    Query(ctx context.Context, filter string, limit int, cursor string) ([]a2a.AgentCard, string, error)
+}
+```
+
+When a registry implements `Querier`:
+- The handler delegates the full query (filter + limit + cursor) in one call
+- Cursor strings are treated as opaque — the handler never decodes or encodes them
+- The implementation owns the pagination strategy (keyset, offset, token-based)
+- `ErrInvalidCursor` signals a bad cursor (handler returns HTTP 400)
+
+The handler uses a 3-tier priority chain: **Querier → Filterer → List+FilterResolver**. If a registry implements both `Querier` and `Filterer`, only the Querier path is used. The handler never falls back to a lower-priority path on error.
+
+```go
+// Example: database-backed Querier
+func (r *PostgresRegistry) Query(ctx context.Context, filter string, limit int, cursor string) ([]a2a.AgentCard, string, error) {
+    if limit < 0 {
+        return nil, "", fmt.Errorf("negative limit: %w", directory.ErrInvalidCursor)
+    }
+    // Execute single DB query with WHERE, LIMIT, and cursor conditions
+    // Return cards, next cursor token, and any error
+}
+```
 
 ## Architecture
 
