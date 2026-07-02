@@ -317,6 +317,15 @@ func TestRegistryErrorReturns500(t *testing.T) {
 	}
 }
 
+// TestMemoryRegistryDoesNotImplementQuerier validates Requirements 3.1, 3.5:
+// THE MemoryRegistry SHALL satisfy the Registry interface without implementing the Querier interface.
+func TestMemoryRegistryDoesNotImplementQuerier(t *testing.T) {
+	reg := directory.NewMemoryRegistry()
+	if _, ok := interface{}(reg).(directory.Querier); ok {
+		t.Fatal("*MemoryRegistry must NOT implement Querier interface")
+	}
+}
+
 // --- Integration Tests for Standalone Server ---
 
 // TestListenAndServe_StartsAndAcceptsConnections validates Requirement 7.1:
@@ -2165,4 +2174,663 @@ func TestHelpTrueResponseFormatMatchesQueryResult(t *testing.T) {
 	if _, hasNextToken := rawResult["next_token"]; hasNextToken {
 		t.Fatal("expected 'next_token' to be absent when help=true")
 	}
+}
+
+// --- Mock helpers for Querier property tests ---
+
+// mockQuerier implements Registry and Querier for testing the Querier priority chain.
+type mockQuerier struct {
+	// Tracking fields
+	queryCalled    bool
+	receivedFilter string
+	receivedLimit  int
+	receivedCursor string
+
+	// Configurable return values
+	returnCards  []a2a.AgentCard
+	returnCursor string
+	returnErr    error
+}
+
+func (m *mockQuerier) Register(_ context.Context, _ a2a.AgentCard) error { return nil }
+
+func (m *mockQuerier) Unregister(_ context.Context, _ string) (bool, error) { return false, nil }
+
+func (m *mockQuerier) List(_ context.Context) ([]a2a.AgentCard, error) { return nil, nil }
+
+func (m *mockQuerier) Len(_ context.Context) (int, error) { return 0, nil }
+
+func (m *mockQuerier) Query(_ context.Context, filter string, limit int, cursor string) ([]a2a.AgentCard, string, error) {
+	m.queryCalled = true
+	m.receivedFilter = filter
+	m.receivedLimit = limit
+	m.receivedCursor = cursor
+	return m.returnCards, m.returnCursor, m.returnErr
+}
+
+// mockQuerierFilterer implements Registry, Querier, AND Filterer to test priority.
+type mockQuerierFilterer struct {
+	// Tracking
+	queryCalled  bool
+	filterCalled bool
+	listCalled   bool
+
+	// Configurable return values for Query
+	returnCards  []a2a.AgentCard
+	returnCursor string
+	returnErr    error
+}
+
+func (m *mockQuerierFilterer) Register(_ context.Context, _ a2a.AgentCard) error { return nil }
+
+func (m *mockQuerierFilterer) Unregister(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
+func (m *mockQuerierFilterer) List(_ context.Context) ([]a2a.AgentCard, error) {
+	m.listCalled = true
+	return nil, nil
+}
+
+func (m *mockQuerierFilterer) Len(_ context.Context) (int, error) { return 0, nil }
+
+func (m *mockQuerierFilterer) Filter(_ context.Context, _ string) ([]a2a.AgentCard, error) {
+	m.filterCalled = true
+	return nil, nil
+}
+
+func (m *mockQuerierFilterer) Query(_ context.Context, filter string, limit int, cursor string) ([]a2a.AgentCard, string, error) {
+	m.queryCalled = true
+	return m.returnCards, m.returnCursor, m.returnErr
+}
+
+// --- Property-Based Tests for Querier behavior ---
+
+// Feature: directory-querier-interface, Property 1: Querier full opaque delegation
+// **Validates: Requirements 2.1, 4.1, 4.2**
+
+func TestPropertyQuerierFullOpaqueDelegation(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("handler passes filter, limit, cursor unmodified to Querier.Query and returns its result directly", prop.ForAll(
+		func(filter string, limit int, cursor string) bool {
+			expectedCards := []a2a.AgentCard{
+				{Name: "card-a", Description: "test card A"},
+				{Name: "card-b", Description: "test card B"},
+			}
+			expectedNextCursor := "next-page-token-xyz"
+
+			mock := &mockQuerier{
+				returnCards:  expectedCards,
+				returnCursor: expectedNextCursor,
+			}
+
+			dir := directory.New(directory.WithRegistry(mock))
+
+			// Build query params
+			reqURL := fmt.Sprintf("/?filter=%s&limit=%d&cursor=%s", filter, limit, cursor)
+			req := httptest.NewRequest(http.MethodGet, reqURL, nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				return false
+			}
+
+			// Verify mock received the exact params
+			if !mock.queryCalled {
+				return false
+			}
+			if mock.receivedFilter != filter {
+				return false
+			}
+			if mock.receivedLimit != limit {
+				return false
+			}
+			if mock.receivedCursor != cursor {
+				return false
+			}
+
+			// Verify the response contains the mock's configured cards and next_token
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+				return false
+			}
+
+			if len(result.Cards) != len(expectedCards) {
+				return false
+			}
+			for i, card := range result.Cards {
+				if card.Name != expectedCards[i].Name {
+					return false
+				}
+			}
+			return result.NextToken == expectedNextCursor
+		},
+		gen.AlphaString(),
+		gen.IntRange(0, 1000),
+		gen.AlphaString(),
+	))
+
+	properties.TestingRun(t)
+}
+
+// Feature: directory-querier-interface, Property 2: Querier priority over Filterer without fallback
+// **Validates: Requirements 2.4, 2.5**
+
+func TestPropertyQuerierPriorityOverFilterer(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("Querier takes priority over Filterer; on Querier error no fallback to Filterer/List", prop.ForAll(
+		func(filter string, limit int, cursor string, shouldError bool) bool {
+			mock := &mockQuerierFilterer{
+				returnCards:  []a2a.AgentCard{{Name: "querier-result"}},
+				returnCursor: "cursor-token",
+			}
+
+			if shouldError {
+				mock.returnErr = errors.New("querier internal error")
+			}
+
+			dir := directory.New(directory.WithRegistry(mock))
+
+			reqURL := fmt.Sprintf("/?filter=%s&limit=%d&cursor=%s", filter, limit, cursor)
+			req := httptest.NewRequest(http.MethodGet, reqURL, nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			// Querier.Query must have been called
+			if !mock.queryCalled {
+				return false
+			}
+
+			// Filterer.Filter and Registry.List must NOT have been called
+			if mock.filterCalled {
+				return false
+			}
+			if mock.listCalled {
+				return false
+			}
+
+			// When Querier returns an error, handler should return 500, not fall back
+			if shouldError {
+				return rec.Code == http.StatusInternalServerError
+			}
+
+			return rec.Code == http.StatusOK
+		},
+		gen.AlphaString(),
+		gen.IntRange(0, 100),
+		gen.AlphaString(),
+		gen.Bool(),
+	))
+
+	properties.TestingRun(t)
+}
+
+// Feature: directory-querier-interface, Property 3: Cursor presence iff more results
+// **Validates: Requirements 1.6, 1.7**
+
+func TestPropertyQuerierCursorPresenceIffMoreResults(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("non-empty nextCursor from Querier means non-empty next_token in response; empty means absent", prop.ForAll(
+		func(cards []a2a.AgentCard, hasMore bool) bool {
+			nextCursor := ""
+			if hasMore {
+				nextCursor = "some-opaque-cursor-token"
+			}
+
+			mock := &mockQuerier{
+				returnCards:  cards,
+				returnCursor: nextCursor,
+			}
+
+			dir := directory.New(directory.WithRegistry(mock))
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				return false
+			}
+
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+				return false
+			}
+
+			if hasMore {
+				// Response must have non-empty next_token
+				return result.NextToken != ""
+			}
+			// Response must have empty/absent next_token
+			return result.NextToken == ""
+		},
+		genAgentCardSlice(),
+		gen.Bool(),
+	))
+
+	properties.TestingRun(t)
+}
+
+// Feature: directory-querier-interface, Property 4: Negative limit returns error
+// **Validates: Requirements 1.4**
+
+func TestPropertyQuerierNegativeLimitReturnsError(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("negative limit passed to Querier returns HTTP 500 when Querier returns error", prop.ForAll(
+		func(negLimit int) bool {
+			// The mock Querier returns an error for negative limits (simulating Requirement 1.4)
+			mock := &mockQuerier{
+				returnErr: errors.New("negative limit is invalid"),
+			}
+
+			dir := directory.New(directory.WithRegistry(mock))
+
+			reqURL := fmt.Sprintf("/?limit=%d", negLimit)
+			req := httptest.NewRequest(http.MethodGet, reqURL, nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			// The handler parses the negative int and passes it to Query.
+			// Query returns a non-ErrInvalidCursor error, so handler returns HTTP 500.
+			if rec.Code != http.StatusInternalServerError {
+				return false
+			}
+
+			// Verify the mock received the negative limit
+			if mock.receivedLimit != negLimit {
+				return false
+			}
+
+			return true
+		},
+		gen.IntRange(-1000, -1),
+	))
+
+	properties.TestingRun(t)
+}
+
+// Feature: directory-querier-interface, Property 5: Invalid cursor yields HTTP 400
+// **Validates: Requirements 1.8, 4.3, 7.1**
+
+func TestPropertyQuerierInvalidCursorYieldsHTTP400(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("Querier returning ErrInvalidCursor (including wrapped) yields HTTP 400 with correct JSON body", prop.ForAll(
+		func(cursor string, wrapMsg string) bool {
+			// Test both direct ErrInvalidCursor and wrapped versions
+			wrappedErr := fmt.Errorf("%s: %w", wrapMsg, directory.ErrInvalidCursor)
+
+			mock := &mockQuerier{
+				returnErr: wrappedErr,
+			}
+
+			dir := directory.New(directory.WithRegistry(mock))
+
+			reqURL := fmt.Sprintf("/?cursor=%s", cursor)
+			req := httptest.NewRequest(http.MethodGet, reqURL, nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			// Handler should detect ErrInvalidCursor via errors.Is and return 400
+			if rec.Code != http.StatusBadRequest {
+				return false
+			}
+
+			// Verify JSON body is {"error": "invalid cursor"}
+			var body map[string]string
+			if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+				return false
+			}
+
+			return body["error"] == "invalid cursor"
+		},
+		gen.AlphaString(),
+		gen.AlphaString(),
+	))
+
+	properties.TestingRun(t)
+}
+
+// Feature: directory-querier-interface, Property 6: Non-cursor Querier errors yield HTTP 500
+// **Validates: Requirements 7.2**
+
+func TestPropertyQuerierNonCursorErrorsYieldHTTP500(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("non-ErrInvalidCursor errors from Querier yield HTTP 500 with internal server error body", prop.ForAll(
+		func(errMsg string) bool {
+			// Create an arbitrary error that is NOT ErrInvalidCursor
+			mock := &mockQuerier{
+				returnErr: errors.New(errMsg),
+			}
+
+			dir := directory.New(directory.WithRegistry(mock))
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusInternalServerError {
+				return false
+			}
+
+			var body map[string]string
+			if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+				return false
+			}
+
+			return body["error"] == "internal server error"
+		},
+		genNonEmptyAlphaGen(),
+	))
+
+	properties.TestingRun(t)
+}
+
+// Feature: directory-querier-interface, Property 7: Nil cards from Querier serialize as empty array
+// **Validates: Requirements 7.3**
+
+func TestPropertyQuerierNilCardsSerializeAsEmptyArray(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("nil cards from Querier serialize as empty JSON array, not null", prop.ForAll(
+		func(cursor string) bool {
+			// Configure Querier to return nil slice with nil error
+			mock := &mockQuerier{
+				returnCards:  nil,
+				returnCursor: cursor,
+				returnErr:    nil,
+			}
+
+			dir := directory.New(directory.WithRegistry(mock))
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				return false
+			}
+
+			// Parse the raw JSON to verify cards is an array (not null)
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+				return false
+			}
+
+			cardsRaw, ok := raw["cards"]
+			if !ok {
+				return false
+			}
+
+			// The raw JSON for "cards" must start with '[' (array), not 'n' (null)
+			trimmed := strings.TrimSpace(string(cardsRaw))
+			if len(trimmed) == 0 || trimmed[0] != '[' {
+				return false
+			}
+
+			// Parse to verify it's a valid empty array
+			var cards []a2a.AgentCard
+			if err := json.Unmarshal(cardsRaw, &cards); err != nil {
+				return false
+			}
+
+			return len(cards) == 0
+		},
+		gen.AlphaString(),
+	))
+
+	properties.TestingRun(t)
+}
+
+// Feature: directory-querier-interface, Property 8: QueryResult JSON field structure preserved
+// **Validates: Requirements 3.4**
+
+func TestPropertyQueryResultJSONFieldStructure(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("QueryResult serialization has exactly cards (always array), optional next_token, optional help", prop.ForAll(
+		func(cards []a2a.AgentCard, nextToken string, includeHelp bool) bool {
+			qr := directory.QueryResult{
+				Cards:     cards,
+				NextToken: nextToken,
+			}
+			if includeHelp {
+				help := directory.DefaultFilterHelp()
+				qr.HelpResp = &help
+			}
+
+			data, err := json.Marshal(qr)
+			if err != nil {
+				return false
+			}
+
+			// Parse as raw map to check field structure
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal(data, &raw); err != nil {
+				return false
+			}
+
+			// "cards" must always be present and be an array
+			cardsRaw, hasCards := raw["cards"]
+			if !hasCards {
+				return false
+			}
+			trimmedCards := strings.TrimSpace(string(cardsRaw))
+			if len(trimmedCards) == 0 || trimmedCards[0] != '[' {
+				return false
+			}
+
+			// "next_token" must be present only when non-empty
+			_, hasNextToken := raw["next_token"]
+			if nextToken == "" && hasNextToken {
+				return false
+			}
+			if nextToken != "" && !hasNextToken {
+				return false
+			}
+
+			// "help" must be present only when non-nil
+			_, hasHelp := raw["help"]
+			if !includeHelp && hasHelp {
+				return false
+			}
+			if includeHelp && !hasHelp {
+				return false
+			}
+
+			// Verify no additional fields exist
+			allowedKeys := map[string]bool{"cards": true, "next_token": true, "help": true}
+			for key := range raw {
+				if !allowedKeys[key] {
+					return false
+				}
+			}
+
+			return true
+		},
+		genAgentCardSlice(),
+		gen.AlphaString(),
+		gen.Bool(),
+	))
+
+	properties.TestingRun(t)
+}
+
+// Feature: directory-querier-interface, Property 9: Adapter transparency with Querier-backed registry
+// **Validates: Requirements 6.2**
+
+func TestPropertyQuerierAdapterTransparency(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("ServeHTTP output for a Querier-backed registry matches exactly what the Querier returned", prop.ForAll(
+		func(cards []a2a.AgentCard, nextCursor string, filter string, limit int, cursor string) bool {
+			mock := &mockQuerier{
+				returnCards:  cards,
+				returnCursor: nextCursor,
+			}
+
+			dir := directory.New(directory.WithRegistry(mock))
+
+			// Build request with filter, limit, cursor
+			params := url.Values{}
+			if filter != "" {
+				params.Set("filter", filter)
+			}
+			if limit > 0 {
+				params.Set("limit", fmt.Sprintf("%d", limit))
+			}
+			if cursor != "" {
+				params.Set("cursor", cursor)
+			}
+
+			reqURL := "/?" + params.Encode()
+			req := httptest.NewRequest(http.MethodGet, reqURL, nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				return false
+			}
+
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+				return false
+			}
+
+			// Verify response cards match exactly what Querier returned
+			if len(result.Cards) != len(cards) {
+				return false
+			}
+			for i, card := range result.Cards {
+				if card.Name != cards[i].Name {
+					return false
+				}
+				if card.Description != cards[i].Description {
+					return false
+				}
+			}
+
+			// Verify response next_token matches exactly what Querier returned
+			if result.NextToken != nextCursor {
+				return false
+			}
+
+			return true
+		},
+		genAgentCardSlice(),
+		gen.AlphaString(),
+		gen.AlphaString(),
+		gen.IntRange(0, 100),
+		gen.AlphaString(),
+	))
+
+	properties.TestingRun(t)
+}
+
+// --- Mock helpers for Property 10 ---
+
+// mockQuerierWithHelp implements Registry, Querier, and FilterHelper.
+type mockQuerierWithHelp struct {
+	mockQuerierFilterer // embed to get Registry + Querier + Filterer tracking
+	helpResponse        directory.FilterHelpResponse
+}
+
+func (m *mockQuerierWithHelp) FilterHelp() directory.FilterHelpResponse {
+	return m.helpResponse
+}
+
+// Feature: directory-querier-interface, Property 10: Help parameter bypasses all query paths and uses Registry FilterHelper first
+// **Validates: Requirements 5.1, 5.2, 5.3, 5.5**
+
+func TestPropertyQuerierHelpParameterBypassesAllQueryPaths(t *testing.T) {
+	parameters := gopter.DefaultTestParameters()
+	parameters.MinSuccessfulTests = 100
+
+	properties := gopter.NewProperties(parameters)
+
+	properties.Property("help=true never calls Querier.Query, Filterer.Filter, or List; uses Registry FilterHelper first", prop.ForAll(
+		func(filter string, limit int, cursor string, helpResp directory.FilterHelpResponse) bool {
+			mock := &mockQuerierWithHelp{
+				helpResponse: helpResp,
+			}
+
+			dir := directory.New(directory.WithRegistry(mock))
+
+			// Build request with help=true and random filter/limit/cursor
+			reqURL := fmt.Sprintf("/?help=true&filter=%s&limit=%d&cursor=%s",
+				url.QueryEscape(filter), limit, url.QueryEscape(cursor))
+			req := httptest.NewRequest(http.MethodGet, reqURL, nil)
+			rec := httptest.NewRecorder()
+			dir.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				return false
+			}
+
+			// Verify Querier.Query was NOT called
+			if mock.queryCalled {
+				return false
+			}
+			// Verify Filterer.Filter was NOT called
+			if mock.filterCalled {
+				return false
+			}
+			// Verify List was NOT called
+			if mock.listCalled {
+				return false
+			}
+
+			// Verify the returned help is from the Registry's FilterHelper (not the resolver)
+			var result directory.QueryResult
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+				return false
+			}
+
+			if result.HelpResp == nil {
+				return false
+			}
+
+			// Verify the help response matches what the Registry FilterHelper returned
+			return filterHelpResponseEqual(*result.HelpResp, helpResp)
+		},
+		gen.AlphaString(),
+		gen.IntRange(0, 100),
+		gen.AlphaString(),
+		genFilterHelpResponse(),
+	))
+
+	properties.TestingRun(t)
 }

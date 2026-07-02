@@ -2,10 +2,16 @@ package directory
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 )
+
+// ErrInvalidCursor is returned by Querier implementations when the provided
+// cursor string cannot be decoded or is otherwise invalid.
+// The handler uses errors.Is to check for this sentinel and responds with HTTP 400.
+var ErrInvalidCursor = errors.New("invalid cursor")
 
 // Registry defines the storage contract for agent cards.
 // Implementations MUST be safe for concurrent use from multiple goroutines.
@@ -28,8 +34,31 @@ type Filterer interface {
 	Filter(ctx context.Context, filter string) ([]a2a.AgentCard, error)
 }
 
+// Querier is an optional interface that a Registry can implement to support
+// native server-side filtering, pagination, and cursor management in a single call.
+// Implementations MUST be safe for concurrent use from multiple goroutines.
+type Querier interface {
+	// Query returns agent cards matching the given filter, respecting the limit and cursor.
+	//
+	// Parameters:
+	//   - filter: substring filter; empty string means "no filtering"
+	//   - limit: maximum results to return; zero means "no limit"
+	//   - cursor: opaque pagination token; empty string means "start from beginning"
+	//
+	// Returns:
+	//   - cards: the result page (may be nil, treated as empty)
+	//   - nextCursor: opaque token for next page; empty means no more results
+	//   - err: ErrInvalidCursor for bad cursors, other errors for internal failures
+	//
+	// A negative limit is invalid and must return an error.
+	Query(ctx context.Context, filter string, limit int, cursor string) (cards []a2a.AgentCard, nextCursor string, err error)
+}
+
 // Compile-time interface check.
 var _ Registry = (*MemoryRegistry)(nil)
+
+// Compile-time check: *MemoryRegistry must NOT implement Querier.
+// This is verified via a runtime reflection test in directory_test.go.
 
 // MemoryRegistry is a thread-safe, in-memory Registry backed by sync.RWMutex and a map.
 // It does NOT implement Querier — filtering falls back to the QueryResolver.
