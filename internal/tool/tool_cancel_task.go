@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -55,12 +56,10 @@ func (c *CancelTaskTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, inp
 		return nil, nil, err
 	}
 
-	a2aClient, err := c.A2AClientResolver.Resolve(ctx, resolved)
-	if err != nil {
-		return nil, nil, handleA2AError(err)
-	}
-
-	_, err = a2aClient.CancelTask(ctx, &a2a.CancelTaskRequest{ID: a2a.TaskID(input.TaskID)})
+	err = resolveClientWithAuthRetry(ctx, c.A2AClientResolver, resolved, func(client *a2aclient.Client) error {
+		_, cancelErr := client.CancelTask(ctx, &a2a.CancelTaskRequest{ID: a2a.TaskID(input.TaskID)})
+		return cancelErr
+	})
 	if err != nil {
 		return nil, nil, handleA2AError(err)
 	}
