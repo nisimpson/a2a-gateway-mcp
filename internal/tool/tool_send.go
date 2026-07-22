@@ -194,8 +194,17 @@ func (s *SendMessageTool) buildSendRequest(ctx context.Context, input *SendMessa
 }
 
 // sendViaStreaming handles the streaming transport path.
+// On auth failure (401/403), evicts the cached client and retries once.
 func (s *SendMessageTool) sendViaStreaming(ctx context.Context, req *mcp.CallToolRequest, input *SendMessageInput, sr *sendRequest) (*mcp.CallToolResult, *SendMessageOutput, error) {
 	result, structured, err := handleStreamingMessage(ctx, req, s.ContextStore, sr.client, sr.request, sr.resolved, input.Agent, s.effectiveStreamTimeout(input.PollTimeoutSeconds))
+	if err != nil && isAuthError(err) {
+		// Evict stale client and retry with a fresh one.
+		s.A2AClientResolver.Evict(sr.resolved.URL)
+		retryClient, resolveErr := s.A2AClientResolver.Resolve(ctx, sr.resolved)
+		if resolveErr == nil {
+			result, structured, err = handleStreamingMessage(ctx, req, s.ContextStore, retryClient, sr.request, sr.resolved, input.Agent, s.effectiveStreamTimeout(input.PollTimeoutSeconds))
+		}
+	}
 	if err != nil {
 		s.recordHealthOutcome(sr.resolved, err)
 		s.recordHistory(ctx, input, nil, nil)
@@ -210,8 +219,14 @@ func (s *SendMessageTool) sendViaStreaming(ctx context.Context, req *mcp.CallToo
 }
 
 // sendDirect handles the non-streaming (request/response) transport path.
+// On auth failure (401/403), evicts the cached client and retries once.
 func (s *SendMessageTool) sendDirect(ctx context.Context, input *SendMessageInput, sr *sendRequest) (*mcp.CallToolResult, *SendMessageOutput, error) {
-	response, err := sr.client.SendMessage(ctx, sr.request)
+	var response a2a.SendMessageResult
+	err := resolveClientWithAuthRetry(ctx, s.A2AClientResolver, sr.resolved, func(client *a2aclient.Client) error {
+		var sendErr error
+		response, sendErr = client.SendMessage(ctx, sr.request)
+		return sendErr
+	})
 	if err != nil {
 		s.recordHealthOutcome(sr.resolved, err)
 		s.recordHistory(ctx, input, nil, nil)

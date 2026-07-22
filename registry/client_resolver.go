@@ -107,10 +107,34 @@ func (r *ClientResolver) findCard(resolved *ResolveResult) *a2a.AgentCard {
 	return nil
 }
 
+// httpClientForResolved returns an HTTP client for the given resolved agent.
+// For alias-based agents, it uses a dynamic [HeaderProvider] that reads
+// current headers from the registry on each request, ensuring rotated
+// credentials are picked up without rebuilding the cached client.
+// For raw-URL agents, headers from the resolve result are used statically.
 func (r *ClientResolver) httpClientForResolved(resolved *ResolveResult) *http.Client {
 	if len(resolved.Headers) == 0 {
 		return r.httpClient
 	}
-	entry := &RegisteredAgent{Headers: resolved.Headers}
-	return HTTPClientForAgent(r.httpClient, entry)
+
+	// For registered aliases, create a provider that reads live headers
+	// from the registry so token rotations are transparent.
+	if resolved.IsAlias {
+		alias := resolved.Alias
+		provider := func() map[string]string {
+			entry := r.registry.Lookup(alias)
+			if entry == nil {
+				return nil
+			}
+			return entry.Headers
+		}
+		return HTTPClientWithHeaderProvider(r.httpClient, provider)
+	}
+
+	// Raw-URL agents have no registry entry; use the static headers from
+	// the resolve result.
+	headers := resolved.Headers
+	return HTTPClientWithHeaderProvider(r.httpClient, func() map[string]string {
+		return headers
+	})
 }

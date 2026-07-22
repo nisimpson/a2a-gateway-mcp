@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nisimpson/a2a-gateway-mcp/internal/specification"
 )
@@ -60,12 +61,12 @@ func (g *GetTaskTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, input 
 		return nil, nil, err
 	}
 
-	a2aClient, err := g.A2AClientResolver.Resolve(ctx, resolved)
-	if err != nil {
-		return nil, nil, handleA2AError(err)
-	}
-
-	task, err := a2aClient.GetTask(ctx, &a2a.GetTaskRequest{ID: a2a.TaskID(input.TaskID)})
+	var task *a2a.Task
+	err = resolveClientWithAuthRetry(ctx, g.A2AClientResolver, resolved, func(client *a2aclient.Client) error {
+		var getErr error
+		task, getErr = client.GetTask(ctx, &a2a.GetTaskRequest{ID: a2a.TaskID(input.TaskID)})
+		return getErr
+	})
 	if err != nil {
 		return nil, nil, handleA2AError(err)
 	}

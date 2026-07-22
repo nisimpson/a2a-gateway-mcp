@@ -208,17 +208,27 @@ func (b *BroadcastMessageTool) broadcastToAgent(ctx context.Context, alias strin
 
 	// Route: streaming or direct.
 	if b.AgentRegistry.SupportsStreaming(resolved) {
-		return b.broadcastViaStreaming(agentCtx, a2aClient, sendReq, alias, input)
+		return b.broadcastViaStreaming(agentCtx, a2aClient, sendReq, alias, input, resolved)
 	}
-	return b.broadcastDirect(agentCtx, a2aClient, sendReq, alias, input)
+	return b.broadcastDirect(agentCtx, a2aClient, sendReq, alias, input, resolved)
 }
 
 // broadcastViaStreaming sends via streaming transport.
-func (b *BroadcastMessageTool) broadcastViaStreaming(ctx context.Context, client *a2aclient.Client, sendReq *a2a.SendMessageRequest, alias string, input *BroadcastMessageInput) (*broadcastResult, *SendMessageOutput) {
+// On auth failure (401/403), evicts the cached client and retries once.
+func (b *BroadcastMessageTool) broadcastViaStreaming(ctx context.Context, client *a2aclient.Client, sendReq *a2a.SendMessageRequest, alias string, input *BroadcastMessageInput, resolved *registry.ResolveResult) (*broadcastResult, *SendMessageOutput) {
 	events := client.SendStreamingMessage(ctx, sendReq)
 
 	state := &streamState{}
 	result, err := consumeStream(ctx, events, state)
+	if err != nil && isAuthError(err) {
+		b.A2AClientResolver.Evict(resolved.URL)
+		retryClient, resolveErr := b.A2AClientResolver.Resolve(ctx, resolved)
+		if resolveErr == nil {
+			retryEvents := retryClient.SendStreamingMessage(ctx, sendReq)
+			state = &streamState{}
+			result, err = consumeStream(ctx, retryEvents, state)
+		}
+	}
 	if err != nil {
 		b.recordBroadcastHealthOutcome(alias, fmt.Errorf("%s", err.Error()))
 		br := &broadcastResult{Status: "error", Error: err.Error()}
@@ -250,8 +260,16 @@ func (b *BroadcastMessageTool) broadcastViaStreaming(ctx context.Context, client
 }
 
 // broadcastDirect sends via non-streaming transport.
-func (b *BroadcastMessageTool) broadcastDirect(ctx context.Context, client *a2aclient.Client, sendReq *a2a.SendMessageRequest, alias string, input *BroadcastMessageInput) (*broadcastResult, *SendMessageOutput) {
+// On auth failure (401/403), evicts the cached client and retries once.
+func (b *BroadcastMessageTool) broadcastDirect(ctx context.Context, client *a2aclient.Client, sendReq *a2a.SendMessageRequest, alias string, input *BroadcastMessageInput, resolved *registry.ResolveResult) (*broadcastResult, *SendMessageOutput) {
 	sendResult, err := client.SendMessage(ctx, sendReq)
+	if err != nil && isAuthError(err) {
+		b.A2AClientResolver.Evict(resolved.URL)
+		retryClient, resolveErr := b.A2AClientResolver.Resolve(ctx, resolved)
+		if resolveErr == nil {
+			sendResult, err = retryClient.SendMessage(ctx, sendReq)
+		}
+	}
 	if err != nil {
 		b.recordBroadcastHealthOutcome(alias, err)
 		br := &broadcastResult{Status: "error", Error: err.Error()}
