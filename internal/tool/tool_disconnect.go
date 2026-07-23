@@ -8,16 +8,6 @@ import (
 	"github.com/nisimpson/a2a-gateway-mcp/internal/validate"
 )
 
-// DisconnectAgentOutput is the output schema for the disconnect_agent tool.
-type DisconnectAgentOutput struct {
-	Message string `json:"message" jsonschema:"confirmation message indicating successful disconnection"`
-}
-
-// DisconnectAgentInput is the input schema for the disconnect_agent tool.
-type DisconnectAgentInput struct {
-	Alias string `json:"alias" jsonschema:"alias of the agent to disconnect"`
-}
-
 // DisconnectAgentTool removes a registered agent by alias.
 type DisconnectAgentTool struct {
 	AgentRegistry     AgentRegistry

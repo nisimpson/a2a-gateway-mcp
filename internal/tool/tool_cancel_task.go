@@ -10,17 +10,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// CancelTaskInput is the input schema for the cancel_task tool.
-type CancelTaskInput struct {
-	Agent  string `json:"agent" jsonschema:"agent alias from registry or full HTTP/HTTPS URL"`
-	TaskID string `json:"task_id" jsonschema:"the task identifier to cancel"`
-}
-
-// CancelTaskOutput is the output schema for the cancel_task tool.
-type CancelTaskOutput struct {
-	Message string `json:"message" jsonschema:"confirmation that the task was canceled"`
-}
-
 // CancelTaskTool cancels a previously initiated task on an A2A agent.
 type CancelTaskTool struct {
 	AgentRegistry     AgentRegistry

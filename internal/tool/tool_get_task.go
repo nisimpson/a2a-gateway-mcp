@@ -10,20 +10,6 @@ import (
 	"github.com/nisimpson/a2a-gateway-mcp/internal/specification"
 )
 
-// GetTaskInput is the input schema for the get_task tool.
-type GetTaskInput struct {
-	Agent  string `json:"agent" jsonschema:"agent alias from registry or full HTTP/HTTPS URL"`
-	TaskID string `json:"task_id" jsonschema:"the task identifier to retrieve"`
-}
-
-// GetTaskOutput is the output schema for the get_task tool.
-type GetTaskOutput struct {
-	ID        string `json:"id" jsonschema:"task identifier"`
-	ContextID string `json:"contextId,omitempty" jsonschema:"conversation context identifier"`
-	State     string `json:"state" jsonschema:"current task state (completed, working, input-required, failed, canceled)"`
-	Response  string `json:"response,omitempty" jsonschema:"task response text extracted from artifacts or status message"`
-}
-
 // GetTaskTool retrieves the current state of a previously initiated task.
 type GetTaskTool struct {
 	AgentRegistry     AgentRegistry

@@ -12,24 +12,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// GetAgentCardInput is the input schema for the get_agent_card tool.
-type GetAgentCardInput struct {
-	Agent string `json:"agent" jsonschema:"agent alias from registry or full HTTP/HTTPS URL"`
-}
-
-// GetAgentCardOutput is the output schema for the get_agent_card tool.
-type GetAgentCardOutput struct {
-	Name         string   `json:"name" jsonschema:"agent display name"`
-	Description  string   `json:"description,omitempty" jsonschema:"agent description"`
-	URL          string   `json:"url,omitempty" jsonschema:"agent URL"`
-	Version      string   `json:"version,omitempty" jsonschema:"agent version"`
-	Skills       []any    `json:"skills,omitempty" jsonschema:"agent skills"`
-	Capabilities any      `json:"capabilities,omitempty" jsonschema:"agent capabilities object"`
-	Provider     any      `json:"provider,omitempty" jsonschema:"agent provider information"`
-	InputModes   []string `json:"inputModes,omitempty" jsonschema:"supported input MIME types"`
-	OutputModes  []string `json:"outputModes,omitempty" jsonschema:"supported output MIME types"`
-}
-
 // GetAgentCardTool retrieves the agent card from an A2A agent's
 // /.well-known/agent-card.json endpoint.
 type GetAgentCardTool struct {

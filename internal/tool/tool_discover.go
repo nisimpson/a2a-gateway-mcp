@@ -17,22 +17,6 @@ import (
 	"github.com/nisimpson/a2a-gateway-mcp/internal/validate"
 )
 
-// DiscoverAgentsInput is the input schema for the discover_agents tool.
-type DiscoverAgentsInput struct {
-	DirectoryURL string            `json:"directory_url" jsonschema:"HTTP or HTTPS URL of the agent directory service"`
-	Filter       string            `json:"filter,omitempty" jsonschema:"free-text search filter passed to the directory (max 256 chars)"`
-	Limit        *int              `json:"limit,omitempty" jsonschema:"maximum number of agent cards to return (min 1)"`
-	Cursor       string            `json:"cursor,omitempty" jsonschema:"cursor token for pagination, pass the next_token from previous response to get the next page of results"`
-	Headers      map[string]string `json:"headers,omitempty" jsonschema:"optional HTTP headers for directory authentication (max 20 entries)"`
-	Help         bool              `json:"help,omitempty" jsonschema:"if true, return filter help documentation instead of agent cards"`
-}
-
-// DiscoverAgentsOutput is the output schema for the discover_agents tool.
-type DiscoverAgentsOutput struct {
-	Agents    []a2a.AgentCard `json:"agents" jsonschema:"list of discovered agent cards from the directory"`
-	NextToken string          `json:"next_token,omitempty" jsonschema:"cursor token for next page of results"`
-}
-
 // DiscoverAgentsTool queries a remote agent directory service and returns
 // the raw JSON array of agent cards.
 type DiscoverAgentsTool struct {
