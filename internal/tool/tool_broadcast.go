@@ -20,16 +20,6 @@ const (
 	maxBroadcastTimeout     = 120
 )
 
-// BroadcastMessageInput is the input schema for the broadcast_message tool.
-type BroadcastMessageInput struct {
-	Aliases        []string       `json:"aliases" jsonschema:"list of agent aliases to send the message to (min 1, max 20)"`
-	Message        string         `json:"message,omitempty" jsonschema:"plain text message to broadcast. Mutually exclusive with 'parts'."`
-	Parts          []InputPart    `json:"parts,omitempty" jsonschema:"structured message parts. Takes precedence over 'message' if both provided."`
-	TimeoutSeconds *int           `json:"timeout_seconds,omitempty" jsonschema:"per-agent timeout in seconds (min 1, max 120, default 30)"`
-	Metadata       map[string]any `json:"metadata,omitempty" jsonschema:"optional metadata for A2A protocol extensions"`
-	Async          *bool          `json:"async,omitempty" jsonschema:"if true, return immediately and deposit responses in inbox"`
-}
-
 // BroadcastMessageTool handles broadcasting a message to multiple agents concurrently.
 type BroadcastMessageTool struct {
 	AgentRegistry      AgentRegistry

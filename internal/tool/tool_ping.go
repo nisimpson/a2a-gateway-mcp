@@ -10,18 +10,6 @@ import (
 	"github.com/nisimpson/a2a-gateway-mcp/health"
 )
 
-// PingAgentInput is the input schema for the ping_agent tool.
-type PingAgentInput struct {
-	Alias string `json:"alias" jsonschema:"alias of the agent to ping (lowercase alphanumeric and hyphens, max 64 chars)"`
-}
-
-// PingAgentOutput is the output schema for the ping_agent tool.
-type PingAgentOutput struct {
-	Reachable    bool   `json:"reachable" jsonschema:"whether the agent responded to the ping"`
-	Health       string `json:"health" jsonschema:"health status after ping (healthy, unhealthy, unknown)"`
-	ResponseTime *int   `json:"response_time_ms,omitempty" jsonschema:"response time in milliseconds (only present when reachable)"`
-}
-
 const pingTimeout = 5 * time.Second
 
 // PingAgentTool performs on-demand liveness checks for registered agents.

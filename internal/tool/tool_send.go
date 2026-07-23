@@ -16,31 +16,6 @@ import (
 	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
-// InputPart represents a single content part in a multi-part message.
-// Exactly one of Text, Data, URL, or Raw should be set.
-type InputPart struct {
-	// Text contains plain text content.
-	Text *string `json:"text,omitempty" jsonschema:"plain text content"`
-	// Data contains structured JSON data to send as a DataPart.
-	Data any `json:"data,omitempty" jsonschema:"structured JSON data (object, array, or primitive)"`
-	// URL contains a URL reference to send as a URLPart.
-	URL *string `json:"url,omitempty" jsonschema:"URL reference"`
-	// Raw contains base64-encoded binary data to send as a RawPart.
-	Raw *string `json:"raw,omitempty" jsonschema:"base64-encoded binary data (standard base64, RFC 4648). Decode with base64.StdEncoding."`
-}
-
-// SendMessageInput is the input schema for the send_message tool.
-type SendMessageInput struct {
-	Agent              string         `json:"agent" jsonschema:"agent alias from registry or full HTTP/HTTPS URL"`
-	Message            string         `json:"message,omitempty" jsonschema:"plain text message to send. Use this for simple text-only messages. Mutually exclusive with 'parts' — if both are provided, 'parts' takes precedence."`
-	Parts              []InputPart    `json:"parts,omitempty" jsonschema:"structured message parts for multi-part or non-text content. Use this when sending JSON data, URLs, or mixed content. Takes precedence over 'message' if both are provided."`
-	ContextID          string         `json:"context_id,omitempty" jsonschema:"optional context ID to continue an existing conversation"`
-	TaskID             string         `json:"task_id,omitempty" jsonschema:"optional task ID to reference an existing task for follow-up messages"`
-	Metadata           map[string]any `json:"metadata,omitempty" jsonschema:"optional metadata for A2A protocol extensions (e.g. caller capabilities)"`
-	PollTimeoutSeconds *int           `json:"poll_timeout_seconds,omitempty" jsonschema:"max seconds to wait for task completion when polling or streaming (negative = no timeout, default: server configured timeout)"`
-	Async              *bool          `json:"async,omitempty" jsonschema:"if true, return immediately and deposit response in inbox"`
-}
-
 // output_schemas.go defines output schema types and JSON schema literals
 // for all gateway tools. These are used to advertise structuredContent shapes
 // via the MCP protocol's OutputSchema field.
@@ -52,22 +27,6 @@ type SendMessageInput struct {
 //    MCP SDK reflect on them to auto-populate OutputSchema.
 //
 // Requirements: SRES-1.2, SRES-6.1
-
-// SendMessageOutput wraps the A2A response in a typed envelope.
-// Exactly one of Message, Task, or Async will be non-nil.
-type SendMessageOutput struct {
-	Message *a2a.Message     `json:"message,omitempty"`
-	Task    *a2a.Task        `json:"task,omitempty"`
-	Async   *AsyncSendOutput `json:"async,omitempty"`
-}
-
-// AsyncSendOutput is returned when async: true. It confirms the message
-// was dispatched without waiting for the agent's response.
-type AsyncSendOutput struct {
-	Alias  string `json:"alias" jsonschema:"agent alias the message was dispatched to"`
-	Status string `json:"status" jsonschema:"dispatch status (dispatched or error)"`
-	Error  string `json:"error,omitempty" jsonschema:"error message if dispatch failed immediately"`
-}
 
 // SendMessageTool sends a message to a connected A2A agent.
 type SendMessageTool struct {

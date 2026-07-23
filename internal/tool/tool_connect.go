@@ -8,21 +8,6 @@ import (
 	"github.com/nisimpson/a2a-gateway-mcp/internal/validate"
 )
 
-// ConnectAgentOutput is the output schema for the connect_agent tool.
-type ConnectAgentOutput struct {
-	Message string `json:"message" jsonschema:"confirmation message indicating successful connection"`
-}
-
-// ConnectAgentInput is the input schema for the connect_agent tool.
-type ConnectAgentInput struct {
-	Alias          string            `json:"alias" jsonschema:"short alias for the agent (lowercase alphanumeric and hyphens only, max 64 chars)"`
-	AgentURL       string            `json:"agent_url" jsonschema:"HTTP or HTTPS URL of the A2A agent"`
-	Headers        map[string]string `json:"headers,omitempty" jsonschema:"optional HTTP headers to include on all requests to this agent (max 20 entries)"`
-	RateLimitRPS   *float64          `json:"rate_limit_rps,omitempty" jsonschema:"requests per second rate limit for this agent (must be provided with rate_limit_burst)"`
-	RateLimitBurst *int              `json:"rate_limit_burst,omitempty" jsonschema:"burst capacity for this agent's rate limiter (must be provided with rate_limit_rps)"`
-	PingEndpoint   *string           `json:"ping_endpoint,omitempty" jsonschema:"relative URL path for liveness checks (starts with /, max 256 chars)"`
-}
-
 // ConnectAgentTool registers a remote A2A agent with a friendly alias.
 type ConnectAgentTool struct {
 	AgentRegistry     AgentRegistry
