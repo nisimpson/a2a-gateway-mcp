@@ -12,25 +12,6 @@ import (
 
 // --- CheckInboxTool ---
 
-// CheckInboxInput is the input schema for the check_inbox tool.
-type CheckInboxInput struct {
-	Alias string `json:"alias,omitempty" jsonschema:"filter by agent alias"`
-}
-
-// CheckInboxOutput is the structured output for the check_inbox tool.
-type CheckInboxOutput struct {
-	Entries []InboxSummary `json:"entries"`
-}
-
-// InboxSummary is a lightweight summary of an inbox entry.
-type InboxSummary struct {
-	Alias     string `json:"alias"`
-	TaskID    string `json:"task_id,omitempty"`
-	ContextID string `json:"context_id,omitempty"`
-	State     string `json:"state"`
-	Timestamp string `json:"timestamp"`
-}
-
 // CheckInboxTool implements the check_inbox MCP tool for non-destructive inbox peek.
 type CheckInboxTool struct {
 	Inbox Inbox
@@ -73,18 +54,6 @@ func (c *CheckInboxTool) Handle(_ context.Context, _ *mcp.CallToolRequest, input
 }
 
 // --- ReadInboxTool ---
-
-// ReadInboxInput is the input schema for the read_inbox tool.
-type ReadInboxInput struct {
-	Alias  string `json:"alias" jsonschema:"agent alias to read messages from"`
-	Length *int   `json:"length,omitempty" jsonschema:"max entries to return (FIFO)"`
-	Latest bool   `json:"latest,omitempty" jsonschema:"pop all but return only the most recent"`
-}
-
-// ReadInboxOutput is the structured output for the read_inbox tool.
-type ReadInboxOutput struct {
-	Messages []SendMessageOutput `json:"messages"`
-}
 
 // ReadInboxTool implements the read_inbox MCP tool for destructive inbox reads.
 type ReadInboxTool struct {

@@ -11,32 +11,10 @@ import (
 	"github.com/nisimpson/a2a-gateway-mcp/registry"
 )
 
-// CallerSkill represents a skill on the caller agent card.
-// CallerSkill is an alias for registry.CallerSkill.
-type CallerSkill = registry.CallerSkill
-
-// CallerCapabilities is an alias for registry.CallerCapabilities.
-type CallerCapabilities = registry.CallerCapabilities
-
 // CallerCard is an alias for registry.CallerCard.
 type CallerCard = registry.CallerCard
 
 // --- CreateCallerCardTool ---
-
-// CreateCallerCardInput is the input schema for the create_caller_card tool.
-type CreateCallerCardInput struct {
-	Name         string              `json:"name" jsonschema:"the caller agent's display name (required)"`
-	Description  string              `json:"description" jsonschema:"what the caller agent does (required)"`
-	URL          string              `json:"url,omitempty" jsonschema:"reachable endpoint for callbacks, if available"`
-	Skills       []CallerSkill       `json:"skills,omitempty" jsonschema:"list of skills the caller agent supports"`
-	Capabilities *CallerCapabilities `json:"capabilities,omitempty" jsonschema:"supported A2A capabilities (e.g., streaming, pushNotifications)"`
-	MetadataKey  string              `json:"metadata_key,omitempty" jsonschema:"metadata attribute name the card will be injected under (default: caller_agent_card)"`
-}
-
-// CreateCallerCardOutput is the output schema for the create_caller_card tool.
-type CreateCallerCardOutput struct {
-	Message string `json:"message" jsonschema:"confirmation that the caller card was registered"`
-}
 
 // CreateCallerCardTool registers or replaces the caller agent card.
 type CreateCallerCardTool struct {
@@ -85,9 +63,6 @@ func (c *CreateCallerCardTool) Handle(_ context.Context, _ *mcp.CallToolRequest,
 
 // --- ViewCallerCardTool ---
 
-// ViewCallerCardInput is the input schema for the view_caller_card tool (empty).
-type ViewCallerCardInput struct{}
-
 // ViewCallerCardTool returns the currently stored caller agent card as JSON.
 type ViewCallerCardTool struct {
 	Store CallerCardStore
@@ -124,14 +99,6 @@ func (v *ViewCallerCardTool) Handle(_ context.Context,
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
 	}, nil, nil
-}
-
-// RemoveCallerCardInput is the input schema for the remove_caller_card tool (empty).
-type RemoveCallerCardInput struct{}
-
-// RemoveCallerCardOutput is the output schema for the remove_caller_card tool.
-type RemoveCallerCardOutput struct {
-	Message string `json:"message" jsonschema:"confirmation that the caller card was removed"`
 }
 
 // RemoveCallerCardTool clears the stored caller agent card.

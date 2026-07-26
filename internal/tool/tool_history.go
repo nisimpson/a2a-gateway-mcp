@@ -6,19 +6,7 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/nisimpson/a2a-gateway-mcp/history"
 )
-
-// GetHistoryInput is the input schema for the get_history tool.
-type GetHistoryInput struct {
-	Agent string `json:"agent" jsonschema:"agent alias to retrieve history for"`
-	Limit *int   `json:"limit,omitempty" jsonschema:"maximum number of recent entries to return"`
-}
-
-// GetHistoryOutput is the output schema for the get_history tool.
-type GetHistoryOutput struct {
-	Entries []history.Entry `json:"entries" jsonschema:"chronological list of interaction history entries"`
-}
 
 // GetHistoryTool retrieves the interaction history for a registered agent.
 type GetHistoryTool struct {
@@ -62,16 +50,6 @@ func (g *GetHistoryTool) Handle(ctx context.Context, _ *mcp.CallToolRequest, inp
 	}
 
 	return nil, &GetHistoryOutput{Entries: entries}, nil
-}
-
-// ClearHistoryInput is the input schema for the clear_history tool.
-type ClearHistoryInput struct {
-	Agent string `json:"agent" jsonschema:"agent alias to clear history for"`
-}
-
-// ClearHistoryOutput is the output schema for the clear_history tool.
-type ClearHistoryOutput struct {
-	Message string `json:"message" jsonschema:"confirmation message indicating history was cleared"`
 }
 
 // ClearHistoryTool clears all interaction history for a registered agent.
