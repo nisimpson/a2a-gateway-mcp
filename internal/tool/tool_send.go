@@ -410,7 +410,13 @@ func (s *SendMessageTool) handleTaskResult(ctx context.Context, a2aClient *a2acl
 		// Poll for non-terminal states up to the configured timeout.
 		polledTask, err := s.pollTaskCompletion(ctx, a2aClient, task.ID, pollTimeout)
 		if err != nil {
-			return nil, nil, err
+			// On timeout or poll failure, return the last-known task (if any)
+			// so callers can extract the task ID for later resumption via GetTask.
+			if polledTask == nil {
+				// No successful poll — use the original task from SendMessage.
+				polledTask = task
+			}
+			return nil, &SendMessageOutput{Task: polledTask}, err
 		}
 
 		// Requirement: SRES-1.5 — polled task returns structured content
@@ -451,6 +457,9 @@ func (s *SendMessageTool) handleTaskResult(ctx context.Context, a2aClient *a2acl
 
 // pollTaskCompletion polls the agent for task status every 2s until a terminal
 // state is reached or the given timeout elapses. A zero timeout means no deadline.
+//
+// On timeout, the last successfully polled non-terminal task is returned alongside
+// the error so callers can extract the task ID for later resumption via GetTask.
 func (s *SendMessageTool) pollTaskCompletion(ctx context.Context, a2aClient *a2aclient.Client, taskID a2a.TaskID, timeout time.Duration) (*a2a.Task, error) {
 	var deadline time.Time
 	if timeout > 0 {
@@ -459,19 +468,23 @@ func (s *SendMessageTool) pollTaskCompletion(ctx context.Context, a2aClient *a2a
 	ticker := time.NewTicker(taskPollInterval)
 	defer ticker.Stop()
 
+	var lastTask *a2a.Task
+
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("timeout waiting for task completion: context canceled")
+			return lastTask, fmt.Errorf("timeout waiting for task completion: context canceled")
 		case <-ticker.C:
 			if !deadline.IsZero() && time.Now().After(deadline) {
-				return nil, fmt.Errorf("timeout waiting for task completion after %s", timeout)
+				return lastTask, fmt.Errorf("timeout waiting for task completion after %s", timeout)
 			}
 
 			task, err := a2aClient.GetTask(ctx, &a2a.GetTaskRequest{ID: taskID})
 			if err != nil {
-				return nil, fmt.Errorf("failed to poll task status: %v", err)
+				return lastTask, fmt.Errorf("failed to poll task status: %v", err)
 			}
+
+			lastTask = task
 
 			switch task.Status.State {
 			case a2a.TaskStateCompleted, a2a.TaskStateFailed, a2a.TaskStateCanceled, a2a.TaskStateInputRequired, a2a.TaskStateAuthRequired:
@@ -536,13 +549,17 @@ func (s *SendMessageTool) backgroundSendAndPoll(ctx context.Context, sr *sendReq
 		} else {
 			polled, pollErr := s.pollTaskCompletion(bgCtx, sr.client, v.ID, s.EffectivePollTimeout(nil))
 			if pollErr != nil {
-				// Poll failed/timed out — deposit what we have with the error noted.
+				// Poll failed/timed out — deposit the most recent task state with the error noted.
+				depositTask := v
+				if polled != nil {
+					depositTask = polled
+				}
 				s.Inbox.Deposit(registry.InboxEntry{
 					Alias:     input.Agent,
-					TaskID:    string(v.ID),
-					ContextID: v.ContextID,
-					State:     string(v.Status.State),
-					Task:      v,
+					TaskID:    string(depositTask.ID),
+					ContextID: depositTask.ContextID,
+					State:     string(depositTask.Status.State),
+					Task:      depositTask,
 					Error:     pollErr.Error(),
 				})
 				return

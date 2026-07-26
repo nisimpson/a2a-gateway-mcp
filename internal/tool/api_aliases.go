@@ -59,3 +59,60 @@ type PingAgentInput = api.PingAgentInput
 
 // PingAgentOutput is an alias for [api.PingAgentOutput].
 type PingAgentOutput = api.PingAgentOutput
+
+// ListAgentsInput is an alias for [api.ListAgentsInput].
+type ListAgentsInput = api.ListAgentsInput
+
+// ListAgentsOutput is an alias for [api.ListAgentsOutput].
+type ListAgentsOutput = api.ListAgentsOutput
+
+// ListAgentEntry is an alias for [api.ListAgentEntry].
+type ListAgentEntry = api.ListAgentEntry
+
+// GetHistoryInput is an alias for [api.GetHistoryInput].
+type GetHistoryInput = api.GetHistoryInput
+
+// GetHistoryOutput is an alias for [api.GetHistoryOutput].
+type GetHistoryOutput = api.GetHistoryOutput
+
+// ClearHistoryInput is an alias for [api.ClearHistoryInput].
+type ClearHistoryInput = api.ClearHistoryInput
+
+// ClearHistoryOutput is an alias for [api.ClearHistoryOutput].
+type ClearHistoryOutput = api.ClearHistoryOutput
+
+// CreateCallerCardInput is an alias for [api.CreateCallerCardInput].
+type CreateCallerCardInput = api.CreateCallerCardInput
+
+// CallerSkill is an alias for [api.CallerSkill].
+type CallerSkill = api.CallerSkill
+
+// CallerCapabilities is an alias for [api.CallerCapabilities].
+type CallerCapabilities = api.CallerCapabilities
+
+// CreateCallerCardOutput is an alias for [api.CreateCallerCardOutput].
+type CreateCallerCardOutput = api.CreateCallerCardOutput
+
+// RemoveCallerCardOutput is an alias for [api.RemoveCallerCardOutput].
+type RemoveCallerCardOutput = api.RemoveCallerCardOutput
+
+// RemoveCallerCardInput is an alias for [api.RemoveCallerCardInput].
+type RemoveCallerCardInput = api.RemoveCallerCardInput
+
+// ViewCallerCardInput is an alias for [api.ViewCallerCardInput].
+type ViewCallerCardInput = api.ViewCallerCardInput
+
+// CheckInboxInput is an alias for [api.CheckInboxInput].
+type CheckInboxInput = api.CheckInboxInput
+
+// CheckInboxOutput is an alias for [api.CheckInboxOutput].
+type CheckInboxOutput = api.CheckInboxOutput
+
+// InboxSummary is an alias for [api.InboxSummary].
+type InboxSummary = api.InboxSummary
+
+// ReadInboxInput is an alias for [api.ReadInboxInput].
+type ReadInboxInput = api.ReadInboxInput
+
+// ReadInboxOutput is an alias for [api.ReadInboxOutput].
+type ReadInboxOutput = api.ReadInboxOutput

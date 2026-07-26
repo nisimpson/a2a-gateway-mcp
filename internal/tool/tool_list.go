@@ -7,23 +7,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ListAgentsInput is the input schema for the list_agents tool (empty).
-type ListAgentsInput struct{}
-
-// ListAgentsOutput is the output schema for the list_agents tool.
-type ListAgentsOutput struct {
-	Agents []ListAgentEntry `json:"agents" jsonschema:"list of registered agents with health and rate limit info"`
-}
-
-// ListAgentEntry describes a single agent in the list_agents output.
-type ListAgentEntry struct {
-	Alias               string `json:"alias" jsonschema:"agent alias"`
-	URL                 string `json:"url" jsonschema:"agent URL"`
-	RateLimit           string `json:"rate_limit" jsonschema:"rate limit description (e.g. '1.00 rps, burst 5' or 'unlimited')"`
-	Health              string `json:"health" jsonschema:"health status (healthy, unhealthy, unknown)"`
-	ConsecutiveFailures *int   `json:"consecutive_failures,omitempty" jsonschema:"failure count (only present when unhealthy)"`
-}
-
 // ListAgentsTool lists all currently connected agents.
 type ListAgentsTool struct {
 	AgentRegistry AgentRegistry

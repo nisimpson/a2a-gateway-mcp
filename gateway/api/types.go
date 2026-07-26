@@ -1,6 +1,18 @@
 package api
 
-import "github.com/a2aproject/a2a-go/v2/a2a"
+import (
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/nisimpson/a2a-gateway-mcp/history"
+	"github.com/nisimpson/a2a-gateway-mcp/registry"
+)
+
+// CallerSkill is a skill on the caller agent card.
+// This is an alias for [registry.CallerSkill] to avoid type incompatibility.
+type CallerSkill = registry.CallerSkill
+
+// CallerCapabilities describes the A2A capabilities the caller supports.
+// This is an alias for [registry.CallerCapabilities] to avoid type incompatibility.
+type CallerCapabilities = registry.CallerCapabilities
 
 // InputPart represents a single content part in a multi-part message.
 // Exactly one of Text, Data, URL, or Raw should be set.
@@ -219,4 +231,145 @@ type PingAgentOutput struct {
 	Health string `json:"health" jsonschema:"health status after ping (healthy, unhealthy, unknown)"`
 	// ResponseTime is the round-trip time in milliseconds (only present when reachable).
 	ResponseTime *int `json:"response_time_ms,omitempty" jsonschema:"response time in milliseconds (only present when reachable)"`
+}
+
+// --- ListAgents ---
+
+// ListAgentsInput is the input for listing all connected agents (empty).
+type ListAgentsInput struct{}
+
+// ListAgentsOutput is the result of listing connected agents.
+type ListAgentsOutput struct {
+	// Agents is the list of registered agents with health and rate limit info.
+	Agents []ListAgentEntry `json:"agents" jsonschema:"list of registered agents with health and rate limit info"`
+}
+
+// ListAgentEntry describes a single agent in the list_agents output.
+type ListAgentEntry struct {
+	// Alias is the agent's registered alias.
+	Alias string `json:"alias" jsonschema:"agent alias"`
+	// URL is the agent's endpoint URL.
+	URL string `json:"url" jsonschema:"agent URL"`
+	// RateLimit describes the rate limit (e.g. "1.00 rps, burst 5" or "unlimited").
+	RateLimit string `json:"rate_limit" jsonschema:"rate limit description (e.g. '1.00 rps, burst 5' or 'unlimited')"`
+	// Health is the health status (healthy, unhealthy, unknown).
+	Health string `json:"health" jsonschema:"health status (healthy, unhealthy, unknown)"`
+	// ConsecutiveFailures is the failure count (only present when unhealthy).
+	ConsecutiveFailures *int `json:"consecutive_failures,omitempty" jsonschema:"failure count (only present when unhealthy)"`
+}
+
+// --- GetHistory ---
+
+// GetHistoryInput contains the parameters for retrieving agent interaction history.
+type GetHistoryInput struct {
+	// Agent is the agent alias to retrieve history for.
+	Agent string `json:"agent" jsonschema:"agent alias to retrieve history for"`
+	// Limit is the maximum number of recent entries to return.
+	Limit *int `json:"limit,omitempty" jsonschema:"maximum number of recent entries to return"`
+}
+
+// GetHistoryOutput is the result of retrieving agent interaction history.
+type GetHistoryOutput struct {
+	// Entries is the chronological list of interaction history entries.
+	Entries []history.Entry `json:"entries" jsonschema:"chronological list of interaction history entries"`
+}
+
+// --- ClearHistory ---
+
+// ClearHistoryInput contains the parameters for clearing agent interaction history.
+type ClearHistoryInput struct {
+	// Agent is the agent alias to clear history for.
+	Agent string `json:"agent" jsonschema:"agent alias to clear history for"`
+}
+
+// ClearHistoryOutput is the result of clearing history.
+type ClearHistoryOutput struct {
+	// Message is a confirmation that history was cleared.
+	Message string `json:"message" jsonschema:"confirmation message indicating history was cleared"`
+}
+
+// --- CreateCallerCard ---
+
+// CreateCallerCardInput contains the parameters for registering a caller agent card.
+type CreateCallerCardInput struct {
+	// Name is the caller agent's display name (required).
+	Name string `json:"name" jsonschema:"the caller agent's display name (required)"`
+	// Description is what the caller agent does (required).
+	Description string `json:"description" jsonschema:"what the caller agent does (required)"`
+	// URL is a reachable endpoint for callbacks, if available.
+	URL string `json:"url,omitempty" jsonschema:"reachable endpoint for callbacks, if available"`
+	// Skills is a list of skills the caller agent supports.
+	Skills []CallerSkill `json:"skills,omitempty" jsonschema:"list of skills the caller agent supports"`
+	// Capabilities are supported A2A capabilities.
+	Capabilities *CallerCapabilities `json:"capabilities,omitempty" jsonschema:"supported A2A capabilities (e.g., streaming, pushNotifications)"`
+	// MetadataKey is the metadata attribute name the card will be injected under.
+	MetadataKey string `json:"metadata_key,omitempty" jsonschema:"metadata attribute name the card will be injected under (default: caller_agent_card)"`
+}
+
+// CreateCallerCardOutput is the result of creating a caller card.
+type CreateCallerCardOutput struct {
+	// Message is a confirmation that the caller card was registered.
+	Message string `json:"message" jsonschema:"confirmation that the caller card was registered"`
+}
+
+// --- ViewCallerCard ---
+
+// ViewCallerCardInput is the input for viewing the current caller card (empty).
+type ViewCallerCardInput struct{}
+
+// --- RemoveCallerCard ---
+
+// RemoveCallerCardInput is the input for removing a caller card (empty).
+type RemoveCallerCardInput struct{}
+
+// RemoveCallerCardOutput is the result of removing a caller card.
+type RemoveCallerCardOutput struct {
+	// Message is a confirmation that the caller card was removed.
+	Message string `json:"message" jsonschema:"confirmation that the caller card was removed"`
+}
+
+// --- CheckInbox ---
+
+// CheckInboxInput contains the parameters for checking the inbox.
+type CheckInboxInput struct {
+	// Alias filters entries by agent alias. Empty means all agents.
+	Alias string `json:"alias,omitempty" jsonschema:"filter by agent alias"`
+}
+
+// CheckInboxOutput is the result of checking the inbox.
+type CheckInboxOutput struct {
+	// Entries are lightweight summaries of pending async responses.
+	Entries []InboxSummary `json:"entries"`
+}
+
+// InboxSummary is a lightweight summary of an inbox entry.
+type InboxSummary struct {
+	// Alias is the agent alias.
+	Alias string `json:"alias"`
+	// TaskID is the task identifier, if applicable.
+	TaskID string `json:"task_id,omitempty"`
+	// ContextID is the conversation context identifier.
+	ContextID string `json:"context_id,omitempty"`
+	// State is the entry state (completed, working, error, etc.).
+	State string `json:"state"`
+	// Timestamp is when the entry was deposited.
+	Timestamp string `json:"timestamp"`
+}
+
+// --- ReadInbox ---
+
+// ReadInboxInput contains the parameters for reading and consuming inbox entries.
+type ReadInboxInput struct {
+	// Alias is the agent alias to read messages from (required).
+	Alias string `json:"alias" jsonschema:"agent alias to read messages from"`
+	// Length limits the max entries to return (FIFO).
+	Length *int `json:"length,omitempty" jsonschema:"max entries to return (FIFO)"`
+	// Latest pops all but returns only the most recent entry.
+	Latest bool `json:"latest,omitempty" jsonschema:"pop all but return only the most recent"`
+}
+
+// ReadInboxOutput is the result of reading inbox entries.
+type ReadInboxOutput struct {
+	// Messages are the consumed inbox messages in SendMessageOutput format.
+	Messages []SendMessageOutput `json:"messages"`
 }
