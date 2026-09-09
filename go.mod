@@ -1,13 +1,13 @@
 module github.com/nisimpson/a2a-gateway-mcp
 
-go 1.25.11
+go 1.26.0
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.3.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/leanovate/gopter v0.2.11
 	github.com/modelcontextprotocol/go-sdk v1.6.1
-	golang.org/x/time v0.15.0
+	golang.org/x/time v0.16.0
 )
 
 require (
